@@ -5,25 +5,38 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Kronos BTC">
-<title>Kronos BTC Forecast</title>
+<meta name="apple-mobile-web-app-title" content="Kronos">
+<title>Kronos Forecast</title>
 <style>
 :root{--bg:#0a0e1a;--card:#111827;--card2:#1a2235;--border:#1e2d45;--accent:#3b82f6;--accent2:#60a5fa;--green:#10b981;--red:#ef4444;--orange:#f59e0b;--text:#f1f5f9;--muted:#64748b;--muted2:#94a3b8}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
-.header{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:calc(52px + env(safe-area-inset-top)) 20px 20px;text-align:center;border-bottom:1px solid var(--border)}
-.header-logo{font-size:12px;color:var(--accent2);letter-spacing:3px;text-transform:uppercase;margin-bottom:4px}
-.header-title{font-size:26px;font-weight:700;background:linear-gradient(90deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.header-sub{font-size:11px;color:var(--muted2);margin-top:4px}
-.price-bar{background:var(--card);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)}
+.header{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:calc(48px + env(safe-area-inset-top)) 20px 16px;text-align:center;border-bottom:1px solid var(--border)}
+.header-logo{font-size:11px;color:var(--accent2);letter-spacing:3px;text-transform:uppercase;margin-bottom:4px}
+.header-title{font-size:24px;font-weight:700;background:linear-gradient(90deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
+.header-sub{font-size:11px;color:var(--muted2);margin-top:3px}
+
+/* Coin selector */
+.coin-bar{background:var(--card);border-bottom:1px solid var(--border);padding:12px 16px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
+.coin-btn{display:inline-block;padding:7px 14px;border-radius:99px;border:1px solid var(--border);background:var(--card2);color:var(--muted2);font-size:13px;font-weight:600;cursor:pointer;margin-right:8px;transition:all 0.2s;-webkit-tap-highlight-color:transparent}
+.coin-btn.active{background:linear-gradient(135deg,#2563eb,#7c3aed);border-color:transparent;color:white}
+.coin-btn.cached{border-color:var(--green);color:var(--green)}
+.coin-btn.active.cached{background:linear-gradient(135deg,#2563eb,#7c3aed);color:white}
+.coin-btn.computing{border-color:var(--orange);color:var(--orange)}
+
+/* Price bar */
+.price-bar{background:var(--card);padding:12px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)}
 .live-price{font-size:22px;font-weight:700}
 .live-label{font-size:10px;color:var(--muted);text-transform:uppercase}
 .live-badge{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--green)}
 .live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+
 .content{padding:16px;display:flex;flex-direction:column;gap:14px}
 .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px}
 .card-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px}
+
+/* Computing */
 .computing-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px 20px;text-align:center}
 .computing-icon{font-size:44px;margin-bottom:14px}
 .computing-title{font-size:18px;font-weight:700;margin-bottom:10px}
@@ -32,6 +45,12 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .prog-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#3b82f6,#7c3aed);animation:prog 3s ease-in-out infinite}
 @keyframes prog{0%{width:5%}50%{width:85%}100%{width:5%}}
 .prog-label{font-size:11px;color:var(--muted)}
+
+/* Predict button */
+.btn-predict{width:100%;padding:14px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:14px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity 0.2s}
+.btn-predict:active{opacity:.8}
+.btn-predict:disabled{opacity:.5}
+
 .metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .metric{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
 .metric-value{font-size:28px;font-weight:800;line-height:1;margin-bottom:4px}
@@ -45,7 +64,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .table td{padding:6px 0;border-top:1px solid var(--border);vertical-align:middle}
 .table td:last-child{text-align:right}
 .hbadge{display:inline-block;background:var(--card2);border-radius:6px;padding:2px 7px;font-size:11px;color:var(--muted2)}
-.chart-wrap{width:100%;height:220px}
+.chart-wrap{width:100%;height:200px}
 canvas{width:100%!important;height:100%!important}
 .badge-row{text-align:center}
 .badge{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:4px 12px;font-size:11px}
@@ -61,28 +80,53 @@ canvas{width:100%!important;height:100%!important}
 <body>
 <div class="header">
   <div class="header-logo">Foundation Model</div>
-  <div class="header-title">Kronos BTC Forecast</div>
-  <div class="header-sub">Kronos-base · 102M Params · Monte Carlo N=30 · Auto-refresh 2h</div>
+  <div class="header-title">Kronos Forecast</div>
+  <div class="header-sub">Kronos-base · 102M Params · Monte Carlo N=30 · Auto-refresh 1h</div>
 </div>
+
+<!-- Coin selector -->
+<div class="coin-bar" id="coinBar">
+  <span class="coin-btn active" onclick="selectCoin('BTC')" id="btn-BTC">BTC</span>
+  <span class="coin-btn" onclick="selectCoin('ETH')" id="btn-ETH">ETH</span>
+  <span class="coin-btn" onclick="selectCoin('BNB')" id="btn-BNB">BNB</span>
+  <span class="coin-btn" onclick="selectCoin('SOL')" id="btn-SOL">SOL</span>
+  <span class="coin-btn" onclick="selectCoin('ADA')" id="btn-ADA">ADA</span>
+  <span class="coin-btn" onclick="selectCoin('ZEC')" id="btn-ZEC">ZEC</span>
+  <span class="coin-btn" onclick="selectCoin('TAO')" id="btn-TAO">TAO</span>
+</div>
+
+<!-- Price bar -->
 <div class="price-bar">
-  <div><div class="live-label">BTC / USDT</div><div class="live-price" id="livePrice">—</div></div>
+  <div><div class="live-label" id="priceLabel">BTC / USDT</div><div class="live-price" id="livePrice">—</div></div>
   <div class="live-badge"><div class="live-dot"></div>LIVE</div>
 </div>
+
 <div class="content">
   <div class="status-row" id="statusRow"><span>⏳</span><span>Connecting…</span></div>
 
   <!-- Computing screen -->
   <div class="computing-card" id="computingCard">
     <div class="computing-icon">🧠</div>
-    <div class="computing-title">Computing First Prediction</div>
-    <div class="computing-sub">
-      Kronos-base is analysing <strong>384 hours</strong> of BTC/USDT data<br>
+    <div class="computing-title" id="computingTitle">Computing Prediction</div>
+    <div class="computing-sub" id="computingSub">
+      Kronos-base is analysing <strong>384 hours</strong> of data<br>
       and running <strong>30 Monte Carlo simulations</strong>.<br><br>
-      First run takes <strong>~40 minutes</strong> on CPU.<br>
-      After that every result is <strong>instant</strong> — cached &amp; auto-refreshed every 2h.
+      First run takes <strong>~1-2 minutes</strong> on CPU.<br>
+      After that results are <strong>instant</strong> — cached &amp; auto-refreshed every 1h.
     </div>
     <div class="prog-bg"><div class="prog-fill"></div></div>
-    <div class="prog-label" id="computingLabel">Please keep this tab open…</div>
+    <div class="prog-label" id="computingLabel">Please wait…</div>
+  </div>
+
+  <!-- Not started screen -->
+  <div id="notStarted" class="hidden">
+    <div class="computing-card">
+      <div class="computing-icon">🔮</div>
+      <div class="computing-title" id="notStartedTitle">No Prediction Yet</div>
+      <div class="computing-sub">Tap the button below to start a Kronos-base prediction for this coin. Takes ~1-2 minutes.</div>
+      <br>
+      <button class="btn-predict" id="btnPredict" onclick="startPrediction()">Run Kronos-base Prediction</button>
+    </div>
   </div>
 
   <!-- Results -->
@@ -97,14 +141,8 @@ canvas{width:100%!important;height:100%!important}
     <div class="card">
       <div class="card-title">24-Hour Signal</div>
       <div class="metrics">
-        <div class="metric">
-          <div class="metric-value" id="upsideVal">—</div>
-          <div class="metric-label">Upside Probability<br>next 24h</div>
-        </div>
-        <div class="metric">
-          <div class="metric-value" id="volVal">—</div>
-          <div class="metric-label">Volatility Amplification<br>probability</div>
-        </div>
+        <div class="metric"><div class="metric-value" id="upsideVal">—</div><div class="metric-label">Upside Probability<br>next 24h</div></div>
+        <div class="metric"><div class="metric-value" id="volVal">—</div><div class="metric-label">Volatility Amplification<br>probability</div></div>
       </div>
       <div class="bar-wrap">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2)"><span>Bearish</span><span>Bullish</span></div>
@@ -116,13 +154,13 @@ canvas{width:100%!important;height:100%!important}
       <div class="card-title">24h Price Target</div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:30px;font-weight:800" id="targetPrice">—</div>
+          <div style="font-size:28px;font-weight:800" id="targetPrice">—</div>
           <div style="font-size:13px;color:var(--muted2);margin-top:4px" id="targetChange">—</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:11px;color:var(--muted);margin-bottom:2px">Range</div>
-          <div style="font-size:14px;font-weight:600;color:var(--green)" id="tHigh">—</div>
-          <div style="font-size:14px;font-weight:600;color:var(--red)" id="tLow">—</div>
+          <div style="font-size:13px;font-weight:600;color:var(--green)" id="tHigh">—</div>
+          <div style="font-size:13px;font-weight:600;color:var(--red)" id="tLow">—</div>
         </div>
       </div>
     </div>
@@ -135,123 +173,200 @@ canvas{width:100%!important;height:100%!important}
     <div class="card">
       <div class="card-title">Hourly Breakdown</div>
       <table class="table">
-        <thead><tr><th>Hour</th><th>Mean Price</th><th style="text-align:right">Range Hi / Lo</th></tr></thead>
+        <thead><tr><th>Hour</th><th>Mean Price</th><th style="text-align:right">Hi / Lo</th></tr></thead>
         <tbody id="tableBody"></tbody>
       </table>
     </div>
 
-    <div class="badge-row" style="padding:8px 0">
-      <span class="badge badge-blue">🧠 Kronos-base · 102.3M params · N=30 · 384h context</span>
+    <div class="badge-row" style="padding:4px 0">
+      <span class="badge badge-blue">🧠 Kronos-base · 102.3M params · N=30</span>
     </div>
+
+    <button class="btn-predict" onclick="startPrediction()" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border)">🔄 Request Fresh Prediction</button>
   </div>
 </div>
 
 <script>
 const BASE = window.location.origin;
-let pollTimer = null;
+const COINS = ['BTC','ETH','BNB','SOL','ADA','ZEC','TAO'];
+const BINANCE_SYMBOLS = {BTC:'BTCUSDT',ETH:'ETHUSDT',BNB:'BNBUSDT',SOL:'SOLUSDT',ADA:'ADAUSDT',ZEC:'ZECUSDT',TAO:'TAOUSDT'};
 
-// Live BTC price from Binance
+let currentCoin = 'BTC';
+let pollTimer = null;
+let livePriceTimer = null;
+let statusData = {};
+
 async function livePx(){
   try{
-    const r=await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
-    const d=await r.json();
-    document.getElementById('livePrice').textContent='$'+parseFloat(d.price).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});
+    const sym = BINANCE_SYMBOLS[currentCoin];
+    const r = await fetch(`https://api.binance.com/api/v3/ticker/price?symbol=${sym}`);
+    const d = await r.json();
+    const price = parseFloat(d.price);
+    const decimals = price < 1 ? 6 : price < 100 ? 4 : 2;
+    document.getElementById('livePrice').textContent = '$' + price.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:decimals});
+    document.getElementById('priceLabel').textContent = currentCoin + ' / USDT';
   }catch(e){}
 }
 
-// Check model status
 async function checkStatus(){
   try{
-    const r=await fetch(BASE+'/status');
-    const d=await r.json();
-    const el=document.getElementById('statusRow');
-    if(d.model_ready){
-      el.innerHTML='<span>✅</span><span>Kronos-base loaded and ready</span>';
-      startPolling();
-    } else if(d.model_error){
-      el.innerHTML=`<span>❌</span><span>${d.model_error}</span>`;
+    const r = await fetch(BASE+'/status');
+    statusData = await r.json();
+    const el = document.getElementById('statusRow');
+    if(statusData.model_ready){
+      el.innerHTML = '<span>✅</span><span>Kronos-base loaded and ready</span>';
+      updateCoinButtons();
+      showCoinState();
+    } else if(statusData.model_error){
+      el.innerHTML = `<span>❌</span><span>${statusData.model_error}</span>`;
     } else {
-      el.innerHTML='<span>⏳</span><span>Loading Kronos-base model… (2–5 min first time)</span>';
-      document.getElementById('computingLabel').textContent='Loading model first, then starting prediction…';
-      setTimeout(checkStatus,8000);
+      el.innerHTML = '<span>⏳</span><span>Loading Kronos-base model… (2–5 min)</span>';
+      setTimeout(checkStatus, 8000);
     }
   }catch(e){setTimeout(checkStatus,10000);}
 }
 
+function updateCoinButtons(){
+  COINS.forEach(c => {
+    const btn = document.getElementById('btn-'+c);
+    btn.className = 'coin-btn';
+    if(c === currentCoin) btn.classList.add('active');
+    if(statusData.cached && statusData.cached.includes(c)) btn.classList.add('cached');
+    if(statusData.running && statusData.running[c]) btn.classList.add('computing');
+  });
+}
+
+function selectCoin(coin){
+  currentCoin = coin;
+  updateCoinButtons();
+  livePx();
+  if(pollTimer){ clearInterval(pollTimer); pollTimer=null; }
+  showCoinState();
+}
+
+function showCoinState(){
+  // Hide all panels
+  document.getElementById('computingCard').classList.add('hidden');
+  document.getElementById('notStarted').classList.add('hidden');
+  document.getElementById('results').classList.add('hidden');
+
+  const isRunning = statusData.running && statusData.running[currentCoin];
+  const isCached = statusData.cached && statusData.cached.includes(currentCoin);
+
+  if(isRunning){
+    // Show computing screen
+    document.getElementById('computingCard').classList.remove('hidden');
+    document.getElementById('computingTitle').textContent = `Computing ${currentCoin} Prediction`;
+    document.getElementById('computingLabel').textContent = 'Running Monte Carlo N=30… (~1-2 min)';
+    startPolling();
+  } else if(isCached){
+    // Load from cache
+    loadCache();
+  } else {
+    // Show not started
+    document.getElementById('notStarted').classList.remove('hidden');
+    document.getElementById('notStartedTitle').textContent = `${currentCoin} — No Prediction Yet`;
+  }
+}
+
 function startPolling(){
   if(pollTimer) return;
-  tryCache();
-  pollTimer=setInterval(tryCache,30000);
+  pollTimer = setInterval(async ()=>{
+    await refreshStatus();
+    await tryCache();
+  }, 30000);
+}
+
+async function refreshStatus(){
+  try{
+    const r = await fetch(BASE+'/status');
+    statusData = await r.json();
+    updateCoinButtons();
+  }catch(e){}
 }
 
 async function tryCache(){
   try{
-    const r=await fetch(BASE+'/cache');
-    if(r.status===404){
-      const d=await r.json();
-      document.getElementById('computingLabel').textContent=
-        d.is_running?'Running Monte Carlo N=30… (~40 min total on CPU)':'Waiting to start…';
-      return;
-    }
-    const d=await r.json();
+    const r = await fetch(BASE+'/cache/'+currentCoin);
+    if(r.status===404) return;
+    const d = await r.json();
     if(d.error) return;
-    clearInterval(pollTimer);
-    pollTimer=null;
+    clearInterval(pollTimer); pollTimer=null;
     showResults(d);
-    // Light poll every 5min to catch auto-refresh
-    setInterval(tryCache,300000);
+    setInterval(async()=>{
+      await refreshStatus();
+      const r2 = await fetch(BASE+'/cache/'+currentCoin);
+      if(r2.ok){ const d2=await r2.json(); if(!d2.error) showResults(d2); }
+    }, 300000);
+  }catch(e){}
+}
+
+async function loadCache(){
+  try{
+    const r = await fetch(BASE+'/cache/'+currentCoin);
+    if(!r.ok){ showCoinState(); return; }
+    const d = await r.json();
+    if(d.error){ showCoinState(); return; }
+    showResults(d);
+  }catch(e){}
+}
+
+async function startPrediction(){
+  try{
+    const r = await fetch(BASE+'/predict/'+currentCoin);
+    const d = await r.json();
+    await refreshStatus();
+    showCoinState();
   }catch(e){}
 }
 
 function showResults(d){
   document.getElementById('computingCard').classList.add('hidden');
+  document.getElementById('notStarted').classList.add('hidden');
   document.getElementById('results').classList.remove('hidden');
 
-  // Refreshing badge
-  const rb=document.getElementById('refreshBadge');
-  d.is_running?rb.classList.remove('hidden'):rb.classList.add('hidden');
+  const rb = document.getElementById('refreshBadge');
+  d.is_running ? rb.classList.remove('hidden') : rb.classList.add('hidden');
 
-  // Updated time
-  document.getElementById('updatedTime').textContent='Last updated: '+new Date(d.updated_at).toLocaleString();
+  document.getElementById('updatedTime').textContent = 'Last updated: '+new Date(d.updated_at).toLocaleString();
 
-  // Upside probability
-  const up=d.upside_prob;
-  const uEl=document.getElementById('upsideVal');
-  uEl.textContent=up.toFixed(1)+'%';
-  uEl.className='metric-value '+(up>=50?'up':'down');
-  const bar=document.getElementById('upsideBar');
-  bar.style.width=up+'%';
-  bar.style.background=up>=50?'var(--green)':'var(--red)';
+  const up = d.upside_prob;
+  const uEl = document.getElementById('upsideVal');
+  uEl.textContent = up.toFixed(1)+'%';
+  uEl.className = 'metric-value '+(up>=50?'up':'down');
+  const bar = document.getElementById('upsideBar');
+  bar.style.width = up+'%';
+  bar.style.background = up>=50?'var(--green)':'var(--red)';
 
-  // Vol amp
-  const vol=d.vol_amp_prob;
-  const vEl=document.getElementById('volVal');
-  vEl.textContent=vol.toFixed(1)+'%';
-  vEl.className='metric-value '+(vol>=70?'warn':'up');
+  const vol = d.vol_amp_prob;
+  const vEl = document.getElementById('volVal');
+  vEl.textContent = vol.toFixed(1)+'%';
+  vEl.className = 'metric-value '+(vol>=70?'warn':'up');
 
-  // 24h target
-  const fc=d.forecast;
-  const lastMean=fc.mean_close[fc.mean_close.length-1];
-  const lastHigh=fc.upper[fc.upper.length-1];
-  const lastLow=fc.lower[fc.lower.length-1];
-  const chg=((lastMean-d.last_price)/d.last_price*100);
+  const fc = d.forecast;
+  const lastMean = fc.mean_close[fc.mean_close.length-1];
+  const lastHigh = fc.upper[fc.upper.length-1];
+  const lastLow  = fc.lower[fc.lower.length-1];
+  const chg = ((lastMean-d.last_price)/d.last_price*100);
+  const fmt = v => '$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:v<1?6:v<100?4:2});
 
-  document.getElementById('targetPrice').textContent='$'+lastMean.toLocaleString('en-US',{minimumFractionDigits:2});
-  const cEl=document.getElementById('targetChange');
-  cEl.textContent=(chg>=0?'+':'')+chg.toFixed(2)+'% vs current';
-  cEl.style.color=chg>=0?'var(--green)':'var(--red)';
-  document.getElementById('tHigh').textContent='▲ $'+lastHigh.toLocaleString('en-US',{minimumFractionDigits:2});
-  document.getElementById('tLow').textContent='▼ $'+lastLow.toLocaleString('en-US',{minimumFractionDigits:2});
+  document.getElementById('targetPrice').textContent = fmt(lastMean);
+  const cEl = document.getElementById('targetChange');
+  cEl.textContent = (chg>=0?'+':'')+chg.toFixed(2)+'% vs current';
+  cEl.style.color = chg>=0?'var(--green)':'var(--red)';
+  document.getElementById('tHigh').textContent = '▲ '+fmt(lastHigh);
+  document.getElementById('tLow').textContent  = '▼ '+fmt(lastLow);
 
   drawChart(d);
   buildTable(d);
 }
 
 function buildTable(d){
-  const fc=d.forecast;
-  const hours=[0,1,2,5,11,17,23];
-  const tb=document.getElementById('tableBody');
-  tb.innerHTML='';
+  const fc = d.forecast;
+  const hours = [0,1,2,5,11,17,23];
+  const tb = document.getElementById('tableBody');
+  tb.innerHTML = '';
+  const fmt = v => '$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:v<1?6:v<100?4:2});
   hours.forEach(i=>{
     if(i>=fc.mean_close.length) return;
     const m=fc.mean_close[i],hi=fc.upper[i],lo=fc.lower[i];
@@ -260,12 +375,11 @@ function buildTable(d){
     tr.innerHTML=`
       <td><span class="hbadge">+${i+1}h</span></td>
       <td style="font-weight:600;color:${chg>=0?'var(--green)':'var(--red)'}">
-        $${m.toLocaleString('en-US',{minimumFractionDigits:2})}
-        <span style="font-size:10px;color:var(--muted2)">&nbsp;${chg>=0?'+':''}${chg.toFixed(1)}%</span>
+        ${fmt(m)}<span style="font-size:10px;color:var(--muted2)">&nbsp;${chg>=0?'+':''}${chg.toFixed(1)}%</span>
       </td>
       <td style="font-size:11px;color:var(--muted2)">
-        <span style="color:var(--green)">▲${Math.round(hi).toLocaleString()}</span> /
-        <span style="color:var(--red)">▼${Math.round(lo).toLocaleString()}</span>
+        <span style="color:var(--green)">▲${fmt(hi)}</span><br>
+        <span style="color:var(--red)">▼${fmt(lo)}</span>
       </td>`;
     tb.appendChild(tr);
   });
@@ -279,7 +393,6 @@ function drawChart(d){
   ctx.scale(dpr,dpr);
   const W=cv.offsetWidth,H=cv.offsetHeight;
   ctx.clearRect(0,0,W,H);
-
   const hist=d.history.close.slice(-48);
   const fm=d.forecast.mean_close,fu=d.forecast.upper,fl=d.forecast.lower;
   const all=[...hist,...fm,...fu,...fl];
@@ -290,35 +403,26 @@ function drawChart(d){
   const xP=i=>p.l+(i/(total-1))*cW;
   const yP=v=>p.t+(1-(v-minV)/(maxV-minV))*cH;
   const hl=hist.length;
-
-  // Band
   ctx.beginPath();
   fu.forEach((v,i)=>{const x=xP(hl-1+i),y=yP(v);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
   [...fl].reverse().forEach((v,i)=>{const idx=fl.length-1-i;ctx.lineTo(xP(hl-1+idx),yP(v));});
   ctx.closePath();ctx.fillStyle='rgba(245,158,11,.12)';ctx.fill();
-
-  // History
   ctx.beginPath();
   hist.forEach((v,i)=>{const x=xP(i),y=yP(v);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
   ctx.strokeStyle='#60a5fa';ctx.lineWidth=2;ctx.lineJoin='round';ctx.stroke();
-
-  // Forecast mean
   ctx.beginPath();
   fm.forEach((v,i)=>{const x=xP(hl-1+i),y=yP(i===0?hist[hist.length-1]:v);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
   ctx.strokeStyle='#f59e0b';ctx.lineWidth=2;ctx.setLineDash([5,3]);ctx.stroke();ctx.setLineDash([]);
-
-  // Now line
   const nx=xP(hl-1);
   ctx.beginPath();ctx.moveTo(nx,p.t);ctx.lineTo(nx,H-p.b);
   ctx.strokeStyle='rgba(255,255,255,.15)';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([]);
-
   ctx.font='9px -apple-system,sans-serif';
   ctx.fillStyle='rgba(100,116,139,.9)';ctx.fillText('History',p.l+4,H-p.b+13);
   ctx.fillStyle='rgba(245,158,11,.9)';ctx.fillText('Forecast',nx+4,H-p.b+13);
 }
 
 livePx();
-setInterval(livePx,10000);
+livePriceTimer = setInterval(livePx,10000);
 checkStatus();
 </script>
 </body>

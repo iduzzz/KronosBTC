@@ -44,10 +44,17 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .metric{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
 .metric-value{font-size:26px;font-weight:800;line-height:1;margin-bottom:4px}
 .metric-label{font-size:10px;color:var(--muted2);line-height:1.3}
-.up{color:var(--green)}.down{color:var(--red)}.warn{color:var(--orange)}.purple{color:var(--purple)}
+.up{color:var(--green)}.down{color:var(--red)}.warn{color:var(--orange)}
 .bar-wrap{margin-top:10px}
 .bar-bg{background:var(--card2);border-radius:99px;height:8px;overflow:hidden;margin-top:6px}
 .bar-fill{height:100%;border-radius:99px;transition:width 1s ease}
+.ind-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.ind-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
+.ind-val{font-size:14px;font-weight:700;margin-bottom:2px}
+.ind-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.context-box{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px}
+.context-label{font-size:12px;font-weight:600;margin-bottom:8px}
+.context-item{font-size:12px;color:var(--muted2);padding:3px 0;display:flex;align-items:flex-start;gap:6px}
 .table{width:100%;border-collapse:collapse;font-size:13px}
 .table th{text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;padding:0 0 8px;letter-spacing:1px}
 .table td{padding:6px 0;border-top:1px solid var(--border);vertical-align:middle}
@@ -63,22 +70,18 @@ canvas{width:100%!important;height:100%!important}
 @keyframes spin{to{transform:rotate(360deg)}}
 .updated{text-align:center;font-size:11px;color:var(--muted);padding:2px 0 6px}
 .status-row{display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--muted2)}
-.ind-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.ind-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
-.ind-val{font-size:14px;font-weight:700;margin-bottom:2px}
-.ind-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
-.signal-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+.hidden{display:none}
+.signal-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .signal-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
 .signal-val{font-size:13px;font-weight:700;margin-bottom:2px}
 .signal-label{font-size:9px;color:var(--muted);text-transform:uppercase}
-.hidden{display:none}
 </style>
 </head>
 <body>
 <div class="header">
   <div class="header-logo">Foundation Model</div>
   <div class="header-title">Kronos Forecast</div>
-  <div class="header-sub">Kronos-base · 102M · N=30 · 1h+4h · On-chain · News · Auto-refresh 1h</div>
+  <div class="header-sub">Kronos-base · 102M · N=30 · 1h+4h · RSI(Wilder) · Auto-refresh 1h</div>
 </div>
 <div class="coin-bar">
   <span class="coin-btn active" onclick="selectCoin('BTC')" id="btn-BTC">BTC</span>
@@ -99,7 +102,7 @@ canvas{width:100%!important;height:100%!important}
   <div class="computing-card" id="computingCard">
     <div class="computing-icon">🧠</div>
     <div class="computing-title" id="computingTitle">Computing Prediction</div>
-    <div class="computing-sub">Running <strong>Kronos-base 1h + 4h</strong>, on-chain data, news sentiment &amp; technical analysis.<br><br>First run takes <strong>~90 minutes</strong> (two Kronos passes).<br>After that results are <strong>instant</strong> from cache.</div>
+    <div class="computing-sub">Running <strong>Kronos-base 1h + 4h</strong>, on-chain, news &amp; technical analysis.<br><br>First run takes <strong>~90 minutes</strong>.<br>After that results are <strong>instant</strong> from cache.</div>
     <div class="prog-bg"><div class="prog-fill"></div></div>
     <div class="prog-label" id="computingLabel">Please wait…</div>
   </div>
@@ -108,7 +111,7 @@ canvas{width:100%!important;height:100%!important}
     <div class="computing-card">
       <div class="computing-icon">🔮</div>
       <div class="computing-title" id="notStartedTitle">No Prediction Yet</div>
-      <div class="computing-sub">Tap below to start. Takes ~90 min (1h + 4h Kronos passes).</div>
+      <div class="computing-sub">Tap below to start. Takes ~90 min.</div>
       <br>
       <button class="btn-predict" onclick="startPrediction()">Run Kronos Prediction</button>
     </div>
@@ -120,13 +123,13 @@ canvas{width:100%!important;height:100%!important}
     </div>
     <div class="updated" id="updatedTime"></div>
 
-    <!-- Combined Signal -->
+    <!-- PRIMARY: Kronos Signal -->
     <div class="card">
-      <div class="card-title">Combined Signal (All Sources)</div>
+      <div class="card-title">Kronos Model Signal (Primary)</div>
       <div class="metrics">
         <div class="metric">
-          <div class="metric-value" id="combinedVal">—</div>
-          <div class="metric-label">Combined Bull<br>Signal</div>
+          <div class="metric-value" id="upsideVal">—</div>
+          <div class="metric-label">Upside Probability<br>(Kronos-base)</div>
         </div>
         <div class="metric">
           <div class="metric-value" id="confidenceVal">—</div>
@@ -135,27 +138,20 @@ canvas{width:100%!important;height:100%!important}
       </div>
       <div class="bar-wrap">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2)"><span>Bearish</span><span>Bullish</span></div>
-        <div class="bar-bg"><div class="bar-fill" id="combinedBar" style="width:0%"></div></div>
+        <div class="bar-bg"><div class="bar-fill" id="upsideBar" style="width:0%"></div></div>
       </div>
+      <div style="margin-top:10px;font-size:11px;color:var(--muted2);text-align:center" id="timeframeLabel"></div>
     </div>
 
-    <!-- Kronos signal -->
+    <!-- Signal Context -->
     <div class="card">
-      <div class="card-title">Kronos Model (1h + 4h Ensemble)</div>
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-value" id="upsideVal">—</div>
-          <div class="metric-label">Upside Probability<br>next 24h</div>
-        </div>
-        <div class="metric">
-          <div class="metric-value" id="volVal">—</div>
-          <div class="metric-label">Volatility<br>Amplification</div>
-        </div>
-      </div>
-      <div style="margin-top:8px;font-size:11px;color:var(--muted2);text-align:center" id="timeframeLabel"></div>
+      <div class="card-title">Signal Context (Auxiliary Filters)</div>
+      <div id="contextSummary" style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--muted2)"></div>
+      <div id="confirmations"></div>
+      <div id="warnings"></div>
     </div>
 
-    <!-- Price target -->
+    <!-- 24h price target -->
     <div class="card">
       <div class="card-title">24h Price Target (P10–P90)</div>
       <div style="display:flex;justify-content:space-between;align-items:center">
@@ -184,14 +180,14 @@ canvas{width:100%!important;height:100%!important}
       </div>
     </div>
 
-    <!-- Extra signals -->
+    <!-- Additional signals -->
     <div class="card">
-      <div class="card-title">Additional Signals</div>
+      <div class="card-title">Additional Context</div>
       <div class="signal-grid">
-        <div class="signal-item"><div class="signal-val" id="newsVal">—</div><div class="signal-label">News Sentiment</div></div>
-        <div class="signal-item"><div class="signal-val" id="onchainVal">—</div><div class="signal-label">On-chain Activity</div></div>
-        <div class="signal-item" id="domItem" class="hidden"><div class="signal-val" id="domVal">—</div><div class="signal-label">BTC Dominance</div></div>
+        <div class="signal-item"><div class="signal-val" id="newsVal">—</div><div class="signal-label">News</div></div>
         <div class="signal-item"><div class="signal-val" id="memVal">—</div><div class="signal-label">Mempool</div></div>
+        <div class="signal-item"><div class="signal-val" id="txVal">—</div><div class="signal-label">24h Txns</div></div>
+        <div class="signal-item" id="domItem"><div class="signal-val" id="domVal">—</div><div class="signal-label">BTC Dom</div></div>
       </div>
     </div>
 
@@ -211,7 +207,7 @@ canvas{width:100%!important;height:100%!important}
     </div>
 
     <div class="badge-row" style="padding:4px 0">
-      <span class="badge badge-blue">🧠 Kronos-base · 102.3M · N=30 · T=0.7 · 1h+4h · P10/P90</span>
+      <span class="badge badge-blue">🧠 Kronos-base · 102.3M · N=30 · T=0.7 · RSI(Wilder) · P10/P90</span>
     </div>
     <button class="btn-predict" onclick="startPrediction()" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);margin-top:4px">🔄 Request Fresh Prediction</button>
   </div>
@@ -226,8 +222,7 @@ let currentCoin='BTC',pollTimer=null,statusData={};
 async function livePx(){
   try{
     const r=await fetch('https://api.binance.com/api/v3/ticker/price?symbol='+BSYMS[currentCoin]);
-    const d=await r.json();
-    const p=parseFloat(d.price);
+    const d=await r.json();const p=parseFloat(d.price);
     document.getElementById('livePrice').textContent='$'+p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:p<1?6:p<100?4:2});
     document.getElementById('priceLabel').textContent=currentCoin+' / USDT';
   }catch(e){}
@@ -324,31 +319,51 @@ function showResults(d){
   d.is_running?document.getElementById('refreshBadge').classList.remove('hidden'):document.getElementById('refreshBadge').classList.add('hidden');
   document.getElementById('updatedTime').textContent='Last updated: '+new Date(d.updated_at).toLocaleString();
 
-  const cs=d.combined_signal||d.upside_prob;
-  const csEl=document.getElementById('combinedVal');
-  csEl.textContent=cs.toFixed(1)+'%';
-  csEl.className='metric-value '+(cs>=60?'up':cs>=40?'warn':'down');
-  const cbar=document.getElementById('combinedBar');
-  cbar.style.width=cs+'%';
-  cbar.style.background=cs>=60?'var(--green)':cs>=40?'var(--orange)':'var(--red)';
+  // PRIMARY: Kronos upside probability
+  const up=d.upside_prob;
+  const uEl=document.getElementById('upsideVal');
+  uEl.textContent=up.toFixed(1)+'%';
+  uEl.className='metric-value '+(up>=60?'up':up>=40?'warn':'down');
+  const bar=document.getElementById('upsideBar');
+  bar.style.width=up+'%';
+  bar.style.background=up>=60?'var(--green)':up>=40?'var(--orange)':'var(--red)';
 
   const conf=d.confidence||50;
   const confEl=document.getElementById('confidenceVal');
   confEl.textContent=conf.toFixed(0)+'%';
   confEl.className='metric-value '+(conf>=70?'up':conf>=40?'warn':'down');
 
-  const up=d.upside_prob;
-  const uEl=document.getElementById('upsideVal');
-  uEl.textContent=up.toFixed(1)+'%';
-  uEl.className='metric-value '+(up>=50?'up':'down');
-
-  const vol=d.vol_amp_prob;
-  const vEl=document.getElementById('volVal');
-  vEl.textContent=vol.toFixed(1)+'%';
-  vEl.className='metric-value '+(vol>=70?'warn':'up');
-
   document.getElementById('timeframeLabel').textContent=d.has_4h?'✅ 1h + 4h ensemble active':'⚠️ 1h only (4h unavailable)';
 
+  // Signal context
+  if(d.signal_context){
+    const sc=d.signal_context;
+    const sumEl=document.getElementById('contextSummary');
+    sumEl.textContent=sc.context;
+    sumEl.style.color=sc.n_confirm>sc.n_warn?'var(--green)':sc.n_warn>sc.n_confirm?'var(--orange)':'var(--muted2)';
+
+    const confDiv=document.getElementById('confirmations');
+    confDiv.innerHTML='';
+    if(sc.confirmations.length>0){
+      sc.confirmations.forEach(c=>{
+        confDiv.innerHTML+='<div class="context-item"><span style="color:var(--green)">✓</span><span>'+c+'</span></div>';
+      });
+    }
+
+    const warnDiv=document.getElementById('warnings');
+    warnDiv.innerHTML='';
+    if(sc.warnings.length>0){
+      sc.warnings.forEach(w=>{
+        warnDiv.innerHTML+='<div class="context-item"><span style="color:var(--orange)">⚠</span><span>'+w+'</span></div>';
+      });
+    }
+
+    if(sc.confirmations.length===0&&sc.warnings.length===0){
+      confDiv.innerHTML='<div class="context-item"><span style="color:var(--muted2)">—</span><span style="color:var(--muted2)">No strong auxiliary signals at this time</span></div>';
+    }
+  }
+
+  // Price target
   const fc=d.forecast;
   const lastMean=fc.mean_close[fc.mean_close.length-1];
   const lastHigh=fc.upper[fc.upper.length-1];
@@ -361,6 +376,7 @@ function showResults(d){
   document.getElementById('tHigh').textContent='▲ '+fmt(lastHigh);
   document.getElementById('tLow').textContent='▼ '+fmt(lastLow);
 
+  // Technical indicators
   if(d.indicators){
     const ind=d.indicators;
     const rsi=ind.rsi;
@@ -376,9 +392,7 @@ function showResults(d){
     bbEl.textContent=bb.toFixed(0)+'%';
     bbEl.className='ind-val '+(bb<20?'up':bb>80?'down':'warn');
     const vr=ind.vol_ratio;
-    const vrEl=document.getElementById('volRatioVal');
-    vrEl.textContent=vr.toFixed(2)+'x';
-    vrEl.className='ind-val '+(vr>1.5?'up':'warn');
+    document.getElementById('volRatioVal').textContent=vr.toFixed(2)+'x';
     document.getElementById('sma20Val').textContent=fmt(ind.sma20);
   }
 
@@ -389,23 +403,16 @@ function showResults(d){
     fgEl.className='ind-val '+(fg.value>=60?'up':fg.value<=30?'down':'warn');
   }
 
+  // Additional context
   if(d.news){
     const newsEl=document.getElementById('newsVal');
-    newsEl.textContent=d.news.label+' ('+d.news.score+')';
+    newsEl.textContent=d.news.label;
     newsEl.className='signal-val '+(d.news.score>10?'up':d.news.score<-10?'down':'warn');
   }
-
-  if(d.onchain){
-    const ocEl=document.getElementById('onchainVal');
-    const sig=d.onchain.exchange_signal||'neutral';
-    ocEl.textContent=sig==='high_activity'?'🔥 High':sig==='low_activity'?'❄️ Low':'➡️ Normal';
-    ocEl.className='signal-val '+(sig==='high_activity'?'up':sig==='low_activity'?'warn':'up');
-    const memEl=document.getElementById('memVal');
-    const mem=d.onchain.mempool_size||0;
-    memEl.textContent=mem.toLocaleString()+' txs';
-    memEl.className='signal-val '+(mem>50000?'up':mem<5000?'warn':'up');
+  if(d.onchain&&d.onchain.mempool_size!==undefined){
+    document.getElementById('memVal').textContent=(d.onchain.mempool_size||0).toLocaleString()+' '+( d.onchain.mempool_label||'');
+    document.getElementById('txVal').textContent=(d.onchain.tx_count||0).toLocaleString();
   }
-
   if(d.btc_dominance){
     document.getElementById('domVal').textContent=d.btc_dominance.toFixed(1)+'%';
     document.getElementById('domItem').classList.remove('hidden');

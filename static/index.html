@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-title" content="Kronos">
 <title>Kronos Forecast</title>
 <style>
-:root{--bg:#0a0e1a;--card:#111827;--card2:#1a2235;--border:#1e2d45;--accent:#3b82f6;--accent2:#60a5fa;--green:#10b981;--red:#ef4444;--orange:#f59e0b;--text:#f1f5f9;--muted:#64748b;--muted2:#94a3b8}
+:root{--bg:#0a0e1a;--card:#111827;--card2:#1a2235;--border:#1e2d45;--accent:#3b82f6;--accent2:#60a5fa;--green:#10b981;--red:#ef4444;--orange:#f59e0b;--purple:#8b5cf6;--text:#f1f5f9;--muted:#64748b;--muted2:#94a3b8}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
 .header{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:calc(48px + env(safe-area-inset-top)) 20px 16px;text-align:center;border-bottom:1px solid var(--border)}
@@ -42,9 +42,11 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .btn-predict:active{opacity:.8}
 .metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .metric{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
-.metric-value{font-size:28px;font-weight:800;line-height:1;margin-bottom:4px}
+.metric-value{font-size:26px;font-weight:800;line-height:1;margin-bottom:4px}
 .metric-label{font-size:10px;color:var(--muted2);line-height:1.3}
-.up{color:var(--green)}.down{color:var(--red)}.warn{color:var(--orange)}
+.metric-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.metric-sm .metric-value{font-size:18px}
+.up{color:var(--green)}.down{color:var(--red)}.warn{color:var(--orange)}.purple{color:var(--purple)}
 .bar-wrap{margin-top:10px}
 .bar-bg{background:var(--card2);border-radius:99px;height:8px;overflow:hidden;margin-top:6px}
 .bar-fill{height:100%;border-radius:99px;transition:width 1s ease}
@@ -59,10 +61,18 @@ canvas{width:100%!important;height:100%!important}
 .badge{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:4px 12px;font-size:11px}
 .badge-blue{background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);color:var(--accent2)}
 .badge-orange{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--orange)}
+.badge-green{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:var(--green)}
+.badge-red{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red)}
 .spinner{width:10px;height:10px;border:2px solid rgba(245,158,11,.3);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .updated{text-align:center;font-size:11px;color:var(--muted);padding:2px 0 6px}
 .status-row{display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--muted2)}
+.ind-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.ind-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
+.ind-val{font-size:15px;font-weight:700;margin-bottom:2px}
+.ind-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
+.fg-bar{height:10px;border-radius:99px;margin-top:8px;background:linear-gradient(90deg,#ef4444,#f59e0b,#10b981)}
+.fg-indicator{width:12px;height:12px;border-radius:50%;background:white;border:2px solid var(--bg);margin-top:-11px;transition:margin-left .5s}
 .hidden{display:none}
 </style>
 </head>
@@ -70,9 +80,9 @@ canvas{width:100%!important;height:100%!important}
 <div class="header">
   <div class="header-logo">Foundation Model</div>
   <div class="header-title">Kronos Forecast</div>
-  <div class="header-sub">Kronos-base · 102M Params · Monte Carlo N=30 · Auto-refresh 1h</div>
+  <div class="header-sub">Kronos-base · 102M Params · N=30 · P10/P90 Bounds · Auto-refresh 1h</div>
 </div>
-<div class="coin-bar" id="coinBar">
+<div class="coin-bar">
   <span class="coin-btn active" onclick="selectCoin('BTC')" id="btn-BTC">BTC</span>
   <span class="coin-btn" onclick="selectCoin('ETH')" id="btn-ETH">ETH</span>
   <span class="coin-btn" onclick="selectCoin('BNB')" id="btn-BNB">BNB</span>
@@ -87,13 +97,15 @@ canvas{width:100%!important;height:100%!important}
 </div>
 <div class="content">
   <div class="status-row" id="statusRow"><span>⏳</span><span>Connecting…</span></div>
+
   <div class="computing-card" id="computingCard">
     <div class="computing-icon">🧠</div>
     <div class="computing-title" id="computingTitle">Computing Prediction</div>
-    <div class="computing-sub">Kronos-base is analysing <strong>384 hours</strong> of data and running <strong>30 Monte Carlo simulations</strong>.<br><br>First run takes <strong>~40 minutes</strong> on CPU.<br>After that results are <strong>instant</strong> — cached &amp; auto-refreshed every 1h.</div>
+    <div class="computing-sub">Kronos-base is analysing <strong>384 hours</strong> of real-time data and running <strong>30 Monte Carlo simulations</strong>.<br><br>First run takes <strong>~40 minutes</strong> on CPU.<br>After that results are <strong>instant</strong> — cached &amp; auto-refreshed every 1h.</div>
     <div class="prog-bg"><div class="prog-fill"></div></div>
     <div class="prog-label" id="computingLabel">Please wait…</div>
   </div>
+
   <div id="notStarted" class="hidden">
     <div class="computing-card">
       <div class="computing-icon">🔮</div>
@@ -103,53 +115,116 @@ canvas{width:100%!important;height:100%!important}
       <button class="btn-predict" onclick="startPrediction()">Run Kronos-base Prediction</button>
     </div>
   </div>
+
   <div id="results" class="hidden">
-    <div class="badge-row">
+    <div class="badge-row" style="margin-bottom:4px">
       <span class="badge badge-orange hidden" id="refreshBadge"><div class="spinner"></div> Refreshing in background…</span>
     </div>
     <div class="updated" id="updatedTime"></div>
+
+    <!-- Combined Signal (primary metric) -->
     <div class="card">
-      <div class="card-title">24-Hour Signal</div>
+      <div class="card-title">Combined Signal (Kronos + Technicals + Sentiment)</div>
       <div class="metrics">
-        <div class="metric"><div class="metric-value" id="upsideVal">—</div><div class="metric-label">Upside Probability<br>next 24h</div></div>
-        <div class="metric"><div class="metric-value" id="volVal">—</div><div class="metric-label">Volatility Amplification<br>probability</div></div>
+        <div class="metric">
+          <div class="metric-value" id="combinedVal">—</div>
+          <div class="metric-label">Combined Bull<br>Signal</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="confidenceVal">—</div>
+          <div class="metric-label">Model<br>Confidence</div>
+        </div>
       </div>
       <div class="bar-wrap">
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2)"><span>Bearish</span><span>Bullish</span></div>
-        <div class="bar-bg"><div class="bar-fill" id="upsideBar" style="width:0%"></div></div>
+        <div class="bar-bg"><div class="bar-fill" id="combinedBar" style="width:0%"></div></div>
       </div>
     </div>
+
+    <!-- Kronos model signal -->
     <div class="card">
-      <div class="card-title">24h Price Target</div>
+      <div class="card-title">Kronos Model Signal</div>
+      <div class="metrics">
+        <div class="metric">
+          <div class="metric-value" id="upsideVal">—</div>
+          <div class="metric-label">Upside Probability<br>next 24h</div>
+        </div>
+        <div class="metric">
+          <div class="metric-value" id="volVal">—</div>
+          <div class="metric-label">Volatility Amplification<br>probability</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 24h price target -->
+    <div class="card">
+      <div class="card-title">24h Price Target (P10–P90 Confidence Interval)</div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="font-size:28px;font-weight:800" id="targetPrice">—</div>
           <div style="font-size:13px;color:var(--muted2);margin-top:4px" id="targetChange">—</div>
         </div>
         <div style="text-align:right">
-          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">Range</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">P90 / P10</div>
           <div style="font-size:13px;font-weight:600;color:var(--green)" id="tHigh">—</div>
           <div style="font-size:13px;font-weight:600;color:var(--red)" id="tLow">—</div>
         </div>
       </div>
     </div>
+
+    <!-- Technical indicators -->
+    <div class="card">
+      <div class="card-title">Technical Indicators</div>
+      <div class="ind-grid">
+        <div class="ind-item">
+          <div class="ind-val" id="rsiVal">—</div>
+          <div class="ind-label">RSI 14</div>
+        </div>
+        <div class="ind-item">
+          <div class="ind-val" id="macdVal">—</div>
+          <div class="ind-label">MACD</div>
+        </div>
+        <div class="ind-item">
+          <div class="ind-val" id="bbVal">—</div>
+          <div class="ind-label">BB %</div>
+        </div>
+        <div class="ind-item">
+          <div class="ind-val" id="volRatioVal">—</div>
+          <div class="ind-label">Vol Ratio</div>
+        </div>
+        <div class="ind-item">
+          <div class="ind-val" id="sma20Val">—</div>
+          <div class="ind-label">SMA 20</div>
+        </div>
+        <div class="ind-item">
+          <div class="ind-val" id="fgVal">—</div>
+          <div class="ind-label">Fear&Greed</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Chart -->
     <div class="card">
       <div class="card-title">Forecast Chart (24h)</div>
       <div class="chart-wrap"><canvas id="chart"></canvas></div>
     </div>
+
+    <!-- Hourly table -->
     <div class="card">
       <div class="card-title">Hourly Breakdown</div>
       <table class="table">
-        <thead><tr><th>Hour</th><th>Mean Price</th><th style="text-align:right">Hi / Lo</th></tr></thead>
+        <thead><tr><th>Hour</th><th>Mean Price</th><th style="text-align:right">P90 / P10</th></tr></thead>
         <tbody id="tableBody"></tbody>
       </table>
     </div>
+
     <div class="badge-row" style="padding:4px 0">
-      <span class="badge badge-blue">🧠 Kronos-base · 102.3M params · N=30 · T=0.7</span>
+      <span class="badge badge-blue">🧠 Kronos-base · 102.3M params · N=30 · T=0.7 · P10/P90</span>
     </div>
     <button class="btn-predict" onclick="startPrediction()" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);margin-top:4px">🔄 Request Fresh Prediction</button>
   </div>
 </div>
+
 <script>
 const BASE=window.location.origin;
 const COINS=['BTC','ETH','BNB','SOL','ADA','ZEC','TAO'];
@@ -177,7 +252,7 @@ async function checkStatus(){
     }else if(statusData.model_error){
       el.innerHTML='<span>❌</span><span>'+statusData.model_error+'</span>';
     }else{
-      el.innerHTML='<span>⏳</span><span>Loading Kronos-base model… (2–5 min)</span>';
+      el.innerHTML='<span>⏳</span><span>Loading Kronos-base model…</span>';
       setTimeout(checkStatus,8000);
     }
   }catch(e){setTimeout(checkStatus,10000);}
@@ -200,15 +275,12 @@ function selectCoin(coin){
 }
 
 function showCoinState(){
-  document.getElementById('computingCard').classList.add('hidden');
-  document.getElementById('notStarted').classList.add('hidden');
-  document.getElementById('results').classList.add('hidden');
+  ['computingCard','notStarted','results'].forEach(id=>document.getElementById(id).classList.add('hidden'));
   const isRunning=statusData.running&&statusData.running[currentCoin];
   const isCached=statusData.cached&&statusData.cached.includes(currentCoin);
   if(isRunning){
     document.getElementById('computingCard').classList.remove('hidden');
     document.getElementById('computingTitle').textContent='Computing '+currentCoin+' Prediction';
-    document.getElementById('computingLabel').textContent='Running Monte Carlo N=30… (~40 min)';
     startPolling();
   }else if(isCached){loadCache();}
   else{
@@ -230,8 +302,7 @@ async function tryCache(){
   try{
     const r=await fetch(BASE+'/cache/'+currentCoin);
     if(r.status===404)return;
-    const d=await r.json();
-    if(d.error)return;
+    const d=await r.json();if(d.error)return;
     clearInterval(pollTimer);pollTimer=null;
     showResults(d);
     setInterval(async()=>{
@@ -246,49 +317,97 @@ async function loadCache(){
   try{
     const r=await fetch(BASE+'/cache/'+currentCoin);
     if(!r.ok){showCoinState();return;}
-    const d=await r.json();
-    if(d.error){showCoinState();return;}
+    const d=await r.json();if(d.error){showCoinState();return;}
     showResults(d);
   }catch(e){}
 }
 
 async function startPrediction(){
-  try{
-    await fetch(BASE+'/predict/'+currentCoin);
-    await refreshStatus();showCoinState();
-  }catch(e){}
+  try{await fetch(BASE+'/predict/'+currentCoin);await refreshStatus();showCoinState();}catch(e){}
 }
 
+const fmt=v=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:v<1?6:v<100?4:2});
+
 function showResults(d){
-  document.getElementById('computingCard').classList.add('hidden');
-  document.getElementById('notStarted').classList.add('hidden');
+  ['computingCard','notStarted'].forEach(id=>document.getElementById(id).classList.add('hidden'));
   document.getElementById('results').classList.remove('hidden');
   const rb=document.getElementById('refreshBadge');
   d.is_running?rb.classList.remove('hidden'):rb.classList.add('hidden');
   document.getElementById('updatedTime').textContent='Last updated: '+new Date(d.updated_at).toLocaleString();
+
+  // Combined signal
+  const cs=d.combined_signal||d.upside_prob;
+  const csEl=document.getElementById('combinedVal');
+  csEl.textContent=cs.toFixed(1)+'%';
+  csEl.className='metric-value '+(cs>=60?'up':cs>=40?'warn':'down');
+  const cbar=document.getElementById('combinedBar');
+  cbar.style.width=cs+'%';
+  cbar.style.background=cs>=60?'var(--green)':cs>=40?'var(--orange)':'var(--red)';
+
+  // Confidence
+  const conf=d.confidence||50;
+  const confEl=document.getElementById('confidenceVal');
+  confEl.textContent=conf.toFixed(0)+'%';
+  confEl.className='metric-value '+(conf>=70?'up':conf>=40?'warn':'down');
+
+  // Kronos upside
   const up=d.upside_prob;
   const uEl=document.getElementById('upsideVal');
   uEl.textContent=up.toFixed(1)+'%';
   uEl.className='metric-value '+(up>=50?'up':'down');
-  const bar=document.getElementById('upsideBar');
-  bar.style.width=up+'%';
-  bar.style.background=up>=50?'var(--green)':'var(--red)';
+
   const vol=d.vol_amp_prob;
   const vEl=document.getElementById('volVal');
   vEl.textContent=vol.toFixed(1)+'%';
   vEl.className='metric-value '+(vol>=70?'warn':'up');
+
+  // Price target
   const fc=d.forecast;
   const lastMean=fc.mean_close[fc.mean_close.length-1];
   const lastHigh=fc.upper[fc.upper.length-1];
   const lastLow=fc.lower[fc.lower.length-1];
   const chg=((lastMean-d.last_price)/d.last_price*100);
-  const fmt=v=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:v<1?6:v<100?4:2});
   document.getElementById('targetPrice').textContent=fmt(lastMean);
   const cEl=document.getElementById('targetChange');
   cEl.textContent=(chg>=0?'+':'')+chg.toFixed(2)+'% vs current';
   cEl.style.color=chg>=0?'var(--green)':'var(--red)';
   document.getElementById('tHigh').textContent='▲ '+fmt(lastHigh);
   document.getElementById('tLow').textContent='▼ '+fmt(lastLow);
+
+  // Technical indicators
+  if(d.indicators){
+    const ind=d.indicators;
+    const rsi=ind.rsi;
+    const rsiEl=document.getElementById('rsiVal');
+    rsiEl.textContent=rsi.toFixed(1);
+    rsiEl.className='ind-val '+(rsi<30?'up':rsi>70?'down':'warn');
+
+    const mh=ind.macd_hist;
+    const macdEl=document.getElementById('macdVal');
+    macdEl.textContent=mh>=0?'▲ Bull':'▼ Bear';
+    macdEl.className='ind-val '+(mh>=0?'up':'down');
+
+    const bb=ind.bb_pct*100;
+    const bbEl=document.getElementById('bbVal');
+    bbEl.textContent=bb.toFixed(0)+'%';
+    bbEl.className='ind-val '+(bb<20?'up':bb>80?'down':'warn');
+
+    const vr=ind.vol_ratio;
+    const vrEl=document.getElementById('volRatioVal');
+    vrEl.textContent=vr.toFixed(2)+'x';
+    vrEl.className='ind-val '+(vr>1.5?'up':'warn');
+
+    document.getElementById('sma20Val').textContent=fmt(ind.sma20);
+  }
+
+  // Fear & Greed
+  if(d.fear_greed&&d.fear_greed.value!==undefined){
+    const fg=d.fear_greed;
+    const fgEl=document.getElementById('fgVal');
+    fgEl.textContent=fg.value+' '+fg.label;
+    fgEl.className='ind-val '+(fg.value>=60?'up':fg.value<=30?'down':'warn');
+  }
+
   drawChart(d);buildTable(d);
 }
 
@@ -296,13 +415,17 @@ function buildTable(d){
   const fc=d.forecast;
   const hours=[0,1,2,5,11,17,23];
   const tb=document.getElementById('tableBody');tb.innerHTML='';
-  const fmt=v=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:v<1?6:v<100?4:2});
   hours.forEach(i=>{
     if(i>=fc.mean_close.length)return;
     const m=fc.mean_close[i],hi=fc.upper[i],lo=fc.lower[i];
     const chg=((m-d.last_price)/d.last_price*100);
     const tr=document.createElement('tr');
-    tr.innerHTML='<td><span class="hbadge">+'+(i+1)+'h</span></td><td style="font-weight:600;color:'+(chg>=0?'var(--green)':'var(--red)')+'">'+fmt(m)+'<span style="font-size:10px;color:var(--muted2)">&nbsp;'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span></td><td style="font-size:11px;color:var(--muted2)"><span style="color:var(--green)">▲'+fmt(hi)+'</span><br><span style="color:var(--red)">▼'+fmt(lo)+'</span></td>';
+    tr.innerHTML='<td><span class="hbadge">+'+(i+1)+'h</span></td>'
+      +'<td style="font-weight:600;color:'+(chg>=0?'var(--green)':'var(--red)')+'">'+fmt(m)
+      +'<span style="font-size:10px;color:var(--muted2)">&nbsp;'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span></td>'
+      +'<td style="font-size:11px;color:var(--muted2);text-align:right">'
+      +'<span style="color:var(--green)">'+fmt(hi)+'</span><br>'
+      +'<span style="color:var(--red)">'+fmt(lo)+'</span></td>';
     tb.appendChild(tr);
   });
 }
@@ -328,7 +451,7 @@ function drawChart(d){
   ctx.beginPath();
   fu.forEach((v,i)=>{const x=xP(hl-1+i),y=yP(v);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
   [...fl].reverse().forEach((v,i)=>{const idx=fl.length-1-i;ctx.lineTo(xP(hl-1+idx),yP(v));});
-  ctx.closePath();ctx.fillStyle='rgba(245,158,11,.12)';ctx.fill();
+  ctx.closePath();ctx.fillStyle='rgba(245,158,11,.15)';ctx.fill();
   ctx.beginPath();
   hist.forEach((v,i)=>{const x=xP(i),y=yP(v);i===0?ctx.moveTo(x,y):ctx.lineTo(x,y);});
   ctx.strokeStyle='#60a5fa';ctx.lineWidth=2;ctx.lineJoin='round';ctx.stroke();

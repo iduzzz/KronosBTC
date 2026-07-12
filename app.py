@@ -1,4 +1,7 @@
-import os, sys, time, threading, traceback, json, re
+pkill -9 -f python3; sleep 2; sudo fuser -k -9 10000/tcp; sleep 2
+
+cat > /opt/kronosbtc/app.py << 'EOF'
+import os, sys, time, threading, traceback, json, queue
 from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
@@ -23,13 +26,8 @@ REFRESH_SECS   = 3600
 CACHE_FILE     = "/opt/kronosbtc/cache.json"
 
 COINS = {
-    "BTC": "BTCUSDT",
-    "ETH": "ETHUSDT",
-    "BNB": "BNBUSDT",
-    "SOL": "SOLUSDT",
-    "ADA": "ADAUSDT",
-    "ZEC": "ZECUSDT",
-    "TAO": "TAOUSDT",
+    "BTC": "BTCUSDT", "ETH": "ETHUSDT", "BNB": "BNBUSDT", "SOL": "SOLUSDT",
+    "ADA": "ADAUSDT", "ZEC": "ZECUSDT", "TAO": "TAOUSDT",
 }
 
 predictor   = None
@@ -39,6 +37,25 @@ model_ready = False
 model_error = ""
 running     = {}
 
+# SAFE QUEUE WORKER (Prevents thread leaks)
+task_queue = queue.Queue()
+
+def worker():
+    while True:
+        symbol = task_queue.get()
+        if symbol is None: break
+        
+        running[symbol] = True
+        try:
+            run_prediction(symbol)
+        except Exception as e:
+            print(f"[Kronos] {symbol} failed: {e}", flush=True)
+            traceback.print_exc()
+        finally:
+            running[symbol] = False
+        
+        time.sleep(REFRESH_SECS)
+        task_queue.put(symbol) # Re-queue for auto-refresh
 
 # ── Cache persistence ──────────────────────────────────────────────────────────
 def save_cache():
@@ -57,7 +74,6 @@ def load_cache_from_disk():
             print(f"[Cache] Loaded: {list(cache.keys())}", flush=True)
     except Exception as e:
         print(f"[Cache] Load failed: {e}", flush=True)
-
 
 # ── Technical indicators ───────────────────────────────────────────────────────
 def compute_indicators(df):
@@ -96,7 +112,6 @@ def compute_indicators(df):
         "bb_lower":    round(float(bb_lower[-1]), 2),
     }
 
-
 # ── Fear & Greed ───────────────────────────────────────────────────────────────
 def fetch_fear_greed():
     try:
@@ -107,41 +122,30 @@ def fetch_fear_greed():
     except:
         return {"value": 50, "label": "Neutral"}
 
-
 # ── On-chain data (BTC only) ───────────────────────────────────────────────────
 def fetch_onchain():
-    """
-    Fetch BTC on-chain signals:
-    - Exchange net flow (blockchain.info mempool)
-    - Transaction count (activity)
-    """
     result = {"exchange_signal": "neutral", "tx_count": 0, "mempool_size": 0}
     try:
-        # Mempool size (congestion indicator)
         r = requests.get("https://mempool.space/api/mempool", timeout=10)
         if r.ok:
             m = r.json()
             result["mempool_size"] = m.get("count", 0)
             result["mempool_vsize"] = m.get("vsize", 0)
-            # High mempool = high activity = bullish signal
             if result["mempool_size"] > 50000:
                 result["exchange_signal"] = "high_activity"
             elif result["mempool_size"] < 5000:
                 result["exchange_signal"] = "low_activity"
     except Exception as e:
         print(f"[OnChain] Mempool failed: {e}", flush=True)
-
     try:
-        # BTC transaction count (24h)
+        time.sleep(1) # Rate limit protection
         r2 = requests.get("https://blockchain.info/q/24hrtransactioncount", timeout=10)
         if r2.ok:
             result["tx_count"] = int(r2.text.strip())
     except Exception as e:
         print(f"[OnChain] TxCount failed: {e}", flush=True)
-
     print(f"[OnChain] mempool={result['mempool_size']} tx24h={result['tx_count']}", flush=True)
     return result
-
 
 # ── News sentiment ─────────────────────────────────────────────────────────────
 POSITIVE_WORDS = ["bull", "surge", "rally", "gain", "rise", "high", "record", "pump",
@@ -152,7 +156,6 @@ NEGATIVE_WORDS = ["bear", "crash", "drop", "fall", "low", "hack", "ban", "sell",
                   "scam", "fraud", "regulation", "fine", "lawsuit", "plunge"]
 
 def fetch_news_sentiment(symbol):
-    """Fetch RSS from CoinDesk and CoinTelegraph, score sentiment."""
     feeds = [
         "https://www.coindesk.com/arc/outboundfeeds/rss/",
         "https://cointelegraph.com/rss",
@@ -161,13 +164,13 @@ def fetch_news_sentiment(symbol):
     for url in feeds:
         try:
             r = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
-            if not r.ok:
-                continue
+            if not r.ok: continue
             root = ET.fromstring(r.content)
             for item in root.findall(".//item")[:10]:
                 title = item.findtext("title", "")
                 desc  = item.findtext("description", "")
                 headlines.append((title + " " + desc).lower())
+            time.sleep(1) # Rate limit protection
         except Exception as e:
             print(f"[News] {url} failed: {e}", flush=True)
 
@@ -180,8 +183,7 @@ def fetch_news_sentiment(symbol):
     coin_full = coin_map.get(coin_name, coin_name)
 
     relevant = [h for h in headlines if coin_name in h or coin_full in h or "crypto" in h]
-    if not relevant:
-        relevant = headlines  # fall back to general crypto news
+    if not relevant: relevant = headlines
 
     pos = sum(sum(1 for w in POSITIVE_WORDS if w in h) for h in relevant)
     neg = sum(sum(1 for w in NEGATIVE_WORDS if w in h) for h in relevant)
@@ -191,7 +193,6 @@ def fetch_news_sentiment(symbol):
     label = "Positive" if score > 10 else "Negative" if score < -10 else "Neutral"
     print(f"[News] {symbol} sentiment={score} ({label}) pos={pos} neg={neg} articles={len(relevant)}", flush=True)
     return {"score": score, "label": label, "headline_count": len(relevant)}
-
 
 # ── BTC dominance ──────────────────────────────────────────────────────────────
 def fetch_btc_dominance():
@@ -204,7 +205,6 @@ def fetch_btc_dominance():
     except Exception as e:
         print(f"[Dominance] Failed: {e}", flush=True)
     return 50.0
-
 
 # ── Data fetcher ───────────────────────────────────────────────────────────────
 def fetch_candles(symbol, interval="1h", limit=384):
@@ -234,7 +234,6 @@ def fetch_candles(symbol, interval="1h", limit=384):
         except Exception as e:
             print(f"[Data] {url} failed: {e}", flush=True)
     raise RuntimeError(f"Could not fetch {interval} candles for {symbol}")
-
 
 # ── Kronos prediction for a given dataframe ────────────────────────────────────
 def kronos_predict(df, pred_len=24):
@@ -270,44 +269,37 @@ def kronos_predict(df, pred_len=24):
         "future_times": future_times,
     }
 
-
 # ── Core prediction ────────────────────────────────────────────────────────────
 def run_prediction(symbol):
     global cache
 
-    # Fetch 1h candles
     df_1h = fetch_candles(symbol, "1h", LOOKBACK_1H)
     last_price = float(df_1h["close"].iloc[-1])
     last_time  = df_1h["timestamps"].iloc[-1]
 
-    # Technical indicators
     indicators = compute_indicators(df_1h)
     print(f"[Kronos] RSI={indicators['rsi']} MACD={indicators['macd_hist']:.4f} BB%={indicators['bb_pct']:.2f}", flush=True)
 
-    # Fear & Greed
     fear_greed = fetch_fear_greed() if symbol == "BTC" else {"value": 50, "label": "N/A"}
     print(f"[Kronos] Fear&Greed={fear_greed['value']} ({fear_greed['label']})", flush=True)
 
-    # On-chain (BTC only)
     onchain = fetch_onchain() if symbol == "BTC" else {}
-
-    # News sentiment
     news = fetch_news_sentiment(symbol)
-
-    # BTC dominance (for altcoins)
     btc_dominance = fetch_btc_dominance() if symbol != "BTC" else None
 
-    # 1h Kronos prediction
     print(f"[Kronos] Running 1h MC N={MONTE_CARLO_N} for {symbol}...", flush=True)
     pred_1h = kronos_predict(df_1h, pred_len=PRED_LEN)
 
-    # 4h Kronos prediction (#3 — multi-timeframe)
     print(f"[Kronos] Running 4h MC N={MONTE_CARLO_N} for {symbol}...", flush=True)
     try:
         df_4h = fetch_candles(symbol, "4h", LOOKBACK_4H)
         pred_4h = kronos_predict(df_4h, pred_len=6)  # 6 x 4h = 24h
-        # Resample 4h predictions to 24 hourly points
-        mean_4h_resampled = np.repeat(pred_4h["mean"], 4)[:PRED_LEN]
+        
+        # FIX: Interpolate 4h predictions to 24h smoothly (prevents stair-step chart)
+        x_old = np.arange(6) * 4
+        x_new = np.arange(24)
+        mean_4h_resampled = np.interp(x_new, x_old, pred_4h["mean"])
+        
         has_4h = True
         print(f"[Kronos] 4h prediction done.", flush=True)
     except Exception as e:
@@ -315,13 +307,11 @@ def run_prediction(symbol):
         mean_4h_resampled = pred_1h["mean"]
         has_4h = False
 
-    # Ensemble: combine 1h and 4h predictions (60/40 weight)
     if has_4h:
         mean_ensemble = 0.6 * pred_1h["mean"] + 0.4 * mean_4h_resampled
     else:
         mean_ensemble = pred_1h["mean"]
 
-    # Final metrics
     final_prices  = pred_1h["closes"][:, -1]
     upside_prob   = float((final_prices > last_price).mean()) * 100
     std_pct       = pred_1h["std"] / last_price * 100
@@ -330,7 +320,6 @@ def run_prediction(symbol):
     spread_pct    = (pred_1h["upper"] - pred_1h["lower"]) / last_price * 100
     confidence    = round(max(0, 100 - spread_pct.mean() * 2), 1)
 
-    # Combined signal
     tech_signal = 0
     rsi = indicators["rsi"]
     if rsi < 30:   tech_signal += 20
@@ -345,16 +334,14 @@ def run_prediction(symbol):
     fg_signal   = (fear_greed["value"] - 50) * 0.3
     news_signal = news["score"] * 0.2
 
-    # On-chain signal
     onchain_signal = 0
     if onchain.get("exchange_signal") == "high_activity": onchain_signal = 10
     elif onchain.get("exchange_signal") == "low_activity": onchain_signal = -5
 
-    # BTC dominance signal for altcoins
     dom_signal = 0
     if btc_dominance is not None:
-        if btc_dominance > 55: dom_signal = -15  # high dominance = bad for alts
-        elif btc_dominance < 45: dom_signal = 15  # low dominance = alts season
+        if btc_dominance > 55: dom_signal = -15
+        elif btc_dominance < 45: dom_signal = 15
 
     combined = upside_prob + tech_signal * 0.3 + fg_signal + news_signal + onchain_signal + dom_signal
     combined_signal = round(max(0, min(100, combined)), 1)
@@ -399,22 +386,6 @@ def run_prediction(symbol):
     print(f"[Kronos] {symbol} DONE. Upside={upside_prob:.1f}% Signal={combined_signal:.1f}% Conf={confidence:.1f}%", flush=True)
     return result
 
-
-def prediction_loop(symbol):
-    global running
-    running[symbol] = True
-    try:
-        run_prediction(symbol)
-    except Exception as e:
-        print(f"[Kronos] {symbol} failed: {e}", flush=True)
-        traceback.print_exc()
-    finally:
-        running[symbol] = False
-    print(f"[Kronos] {symbol} next refresh in 1h...", flush=True)
-    time.sleep(REFRESH_SECS)
-    threading.Thread(target=prediction_loop, args=(symbol,), daemon=True).start()
-
-
 def load_model():
     global predictor, model_ready, model_error
     try:
@@ -427,15 +398,16 @@ def load_model():
         predictor = KronosPredictor(model, tokenizer, max_context=512)
         model_ready = True
         print("[Kronos] Model ready!", flush=True)
-        threading.Thread(target=prediction_loop, args=("BTC",), daemon=True).start()
+        
+        # Start the safe queue worker
+        threading.Thread(target=worker, daemon=True).start()
+        task_queue.put("BTC") # Queue first prediction
     except Exception as e:
         model_error = str(e)
         print(f"[Kronos] Load failed: {e}", flush=True)
         traceback.print_exc()
 
-
 threading.Thread(target=load_model, daemon=True).start()
-
 
 @app.route("/")
 def index():
@@ -472,9 +444,10 @@ def predict(symbol):
         return jsonify({"error": "Model not loaded yet."}), 503
     if running.get(symbol, False):
         return jsonify({"status": "already_running"})
-    threading.Thread(target=prediction_loop, args=(symbol,), daemon=True).start()
-    return jsonify({"status": "started"})
+    task_queue.put(symbol) # SAFE QUEUE SUBMISSION
+    return jsonify({"status": "queued"})
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False)
+EOF

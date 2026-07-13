@@ -457,6 +457,9 @@ def run_prediction(symbol):
         }
     }
 
+    # Convert all numpy types to native Python for JSON serialization
+    result = json.loads(json.dumps(result, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
+
     with cache_lock:
         cache[symbol] = result
     save_cache()

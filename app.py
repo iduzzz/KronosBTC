@@ -524,8 +524,8 @@ def predict(symbol):
         return jsonify({"error": f"Unknown symbol {symbol}"}), 400
     if not model_ready:
         return jsonify({"error": "Model not loaded yet."}), 503
-    if running.get(symbol, False):
-        return jsonify({"status": "already_running"})
+    if running.get(symbol, False) or symbol in list(task_queue.queue):
+        return jsonify({"status": "already_running_or_queued"})
     task_queue.put(symbol)
     return jsonify({"status": "queued"})
 

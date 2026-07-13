@@ -308,7 +308,21 @@ async function loadCache(){
 }
 
 async function startPrediction(){
-  try{await fetch(BASE+'/predict/'+currentCoin);await refreshStatus();showCoinState();}catch(e){}
+  try{
+    const btns = document.querySelectorAll('.btn-predict');
+    btns.forEach(b=>{b.textContent='⏳ Queuing…';b.disabled=true;});
+    const r = await fetch(BASE+'/predict/'+currentCoin);
+    const d = await r.json();
+    await refreshStatus();
+    showCoinState();
+    if(d.status==='already_running_or_queued'){
+      btns.forEach(b=>{b.textContent='⏳ Already computing — please wait';b.disabled=false;});
+    } else {
+      btns.forEach(b=>{b.textContent='✅ Queued! Computing in background…';b.disabled=false;});
+    }
+  }catch(e){
+    document.querySelectorAll('.btn-predict').forEach(b=>{b.textContent='❌ Error — try again';b.disabled=false;});
+  }
 }
 
 const fmt=v=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:v<1?6:v<100?4:2});

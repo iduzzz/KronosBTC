@@ -32,7 +32,8 @@ cache      = {}
 cache_lock = threading.Lock()
 model_ready = False
 model_error = ""
-running     = {}
+running      = {}   # symbol -> True/False
+running_since = {}  # symbol -> start timestamp
 
 # Safe queue worker — prevents thread leaks
 task_queue = queue.Queue()
@@ -43,6 +44,7 @@ def worker():
         if symbol is None:
             break
         running[symbol] = True
+        running_since[symbol] = time.time()
         try:
             run_prediction(symbol)
         except Exception as e:
@@ -503,6 +505,7 @@ def status():
         "coins":       list(COINS.keys()),
         "cached":      list(cache.keys()),
         "running":     {k: v for k, v in running.items() if v},
+        "running_since": {k: v for k, v in running_since.items() if running.get(k)},
     })
 
 @app.route("/cache/<symbol>")

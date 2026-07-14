@@ -356,11 +356,51 @@ def fetch_candles(symbol, interval="1h", limit=384):
     raise RuntimeError(f"All Binance endpoints failed for {symbol} {interval}")
 
 
+# ── Find safe lookback via fast dry-run (pred_len=2) ─────────────────────────
+def find_safe_lookback(df, symbol):
+    """
+    Run a single fast prediction with pred_len=2 to find the maximum
+    lookback the model can handle without a RoPE tensor size mismatch.
+    Validates BEFORE committing to the full N=50 Monte Carlo loop.
+    """
+    candidates = [len(df), 360, 340, 320, 300, 256]
+    for lookback in candidates:
+        if lookback > len(df):
+            continue
+        test_df = df.tail(lookback).reset_index(drop=True)
+        x_df        = test_df[["open","high","low","close","volume"]].copy()
+        x_timestamp = test_df["timestamps"].copy().reset_index(drop=True)
+        last_time   = test_df["timestamps"].iloc[-1]
+        future_times = pd.date_range(
+            start=last_time + pd.Timedelta(hours=1),
+            periods=2, freq="1h", tz="UTC"
+        )
+        y_timestamp = pd.Series(future_times).reset_index(drop=True)
+        try:
+            with torch.inference_mode():
+                predictor.predict(
+                    df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
+                    pred_len=2, T=0.7, top_p=0.9, sample_count=1
+                )
+            print(f"[Kronos] {symbol} safe lookback={lookback} (dry-run passed)", flush=True)
+            return lookback
+        except RuntimeError as e:
+            if "size of tensor" in str(e) or "must match" in str(e):
+                print(f"[Kronos] {symbol} lookback={lookback} failed dry-run, trying smaller...", flush=True)
+                continue
+            raise
+    raise RuntimeError(f"{symbol}: no working lookback found in {candidates}")
+
+
 # ── Kronos Monte Carlo — N=50, T=0.7, with real-time progress tracking ────────
 def kronos_predict(df, symbol="UNK", pred_len=24):
-    last_time   = df["timestamps"].iloc[-1]
-    x_df        = df[["open","high","low","close","volume"]].copy()
-    x_timestamp = df["timestamps"].copy().reset_index(drop=True)
+    # Step 1: Find safe lookback via fast dry-run BEFORE the MC loop
+    safe_lookback = find_safe_lookback(df, symbol)
+    work_df = df.tail(safe_lookback).reset_index(drop=True)
+
+    last_time   = work_df["timestamps"].iloc[-1]
+    x_df        = work_df[["open","high","low","close","volume"]].copy()
+    x_timestamp = work_df["timestamps"].copy().reset_index(drop=True)
     future_times = pd.date_range(
         start=last_time + pd.Timedelta(hours=1),
         periods=pred_len, freq="1h", tz="UTC"
@@ -370,6 +410,7 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
     all_closes = []
     run_times  = []
 
+    # Step 2: Full MC loop — safe_lookback guaranteed to work, no crashes mid-loop
     with torch.inference_mode():
         for i in range(MONTE_CARLO_N):
             t_start = time.time()
@@ -381,28 +422,28 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
             run_times.append(elapsed)
             all_closes.append(p["close"].values)
 
-            # Update real-time progress
             avg_secs = sum(run_times) / len(run_times)
             remaining = (MONTE_CARLO_N - i - 1) * avg_secs
             progress[symbol] = {
-                "current":      i + 1,
-                "total":        MONTE_CARLO_N,
-                "secs_per_run": round(avg_secs, 2),
+                "current":        i + 1,
+                "total":          MONTE_CARLO_N,
+                "secs_per_run":   round(avg_secs, 2),
                 "remaining_secs": round(remaining, 0),
-                "pct":          round((i + 1) / MONTE_CARLO_N * 100, 1),
+                "pct":            round((i + 1) / MONTE_CARLO_N * 100, 1),
             }
             if i % 10 == 0:
                 print(f"[Kronos] {symbol} MC {i+1}/{MONTE_CARLO_N} ({avg_secs:.1f}s/run, ~{remaining/60:.1f}min left)", flush=True)
 
     closes = np.array(all_closes)
-    progress.pop(symbol, None)  # clear when done
+    progress.pop(symbol, None)
     return {
-        "mean":        closes.mean(axis=0),
-        "upper":       np.percentile(closes, 90, axis=0),
-        "lower":       np.percentile(closes, 10, axis=0),
-        "std":         closes.std(axis=0),
-        "closes":      closes,
+        "mean":         closes.mean(axis=0),
+        "upper":        np.percentile(closes, 90, axis=0),
+        "lower":        np.percentile(closes, 10, axis=0),
+        "std":          closes.std(axis=0),
+        "closes":       closes,
         "future_times": future_times,
+        "lookback_used": safe_lookback,  # actual lookback reported honestly
     }
 
 
@@ -518,6 +559,7 @@ def run_prediction(symbol):
         "upside_prob":   round(upside_prob, 1),
         "confidence":    confidence,
         "vol_amp_prob":  round(vol_amp_prob, 1),
+        "lookback_used": pred.get("lookback_used", LOOKBACK),
         "signal_context": signal_context,
         "indicators":    sig["indicators"],
         "fear_greed":    sig["fear_greed"],
@@ -569,10 +611,9 @@ def load_model():
                 print(f"[Kronos] GPU failed ({e}), falling back to CPU", flush=True)
                 model = model.cpu()
 
-        # N=50 regardless of GPU — KronosPredictor internal tensors run on CPU
-        # (confirmed by measurement: each MC run takes ~5-7s, same as pure CPU)
-        # GPU verified connected but PCIe copies per pass negate any GPU benefit
-        MONTE_CARLO_N = 50
+        # N=100 — KronosPredictor runs on CPU internally (PCIe bottleneck confirmed)
+        # Each run ~5-7s, total ~10 min per coin. Better P10/P90 accuracy than N=50.
+        MONTE_CARLO_N = 100
         device_note = "GPU connected (CPU-bound inference)" if gpu_working else "CPU"
         print(f"[Kronos] {device_note} — N={MONTE_CARLO_N}", flush=True)
 

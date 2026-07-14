@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="Kronos">
 <title>Kronos Forecast</title>
 <style>
-:root{--bg:#0a0e1a;--card:#111827;--card2:#1a2235;--border:#1e2d45;--accent:#3b82f6;--accent2:#60a5fa;--green:#10b981;--red:#ef4444;--orange:#f59e0b;--text:#f1f5f9;--muted:#64748b;--muted2:#94a3b8}
+:root{--bg:#0a0e1a;--card:#111827;--card2:#1a2235;--border:#1e2d45;--accent:#3b82f6;--accent2:#60a5fa;--green:#10b981;--red:#ef4444;--orange:#f59e0b;--purple:#8b5cf6;--text:#f1f5f9;--muted:#64748b;--muted2:#94a3b8}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
 .header{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:calc(48px + env(safe-area-inset-top)) 20px 16px;text-align:center;border-bottom:1px solid var(--border)}
@@ -68,14 +68,18 @@ canvas{width:100%!important;height:100%!important}
 .badge{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:4px 12px;font-size:11px}
 .badge-blue{background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);color:var(--accent2)}
 .badge-orange{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--orange)}
+.badge-green{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:var(--green)}
+.badge-purple{background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.3);color:var(--purple)}
 .spinner{width:10px;height:10px;border:2px solid rgba(245,158,11,.3);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .updated{text-align:center;font-size:11px;color:var(--muted);padding:2px 0 6px}
+.stale-warn{color:var(--orange);font-weight:600}
 .status-row{display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--muted2)}
 .signal-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .signal-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
 .signal-val{font-size:13px;font-weight:700;margin-bottom:2px}
 .signal-label{font-size:9px;color:var(--muted);text-transform:uppercase}
+.accuracy-box{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;margin-top:8px}
 .hidden{display:none}
 </style>
 </head>
@@ -83,7 +87,7 @@ canvas{width:100%!important;height:100%!important}
 <div class="header">
   <div class="header-logo">Foundation Model</div>
   <div class="header-title">Kronos Forecast</div>
-  <div class="header-sub">Kronos-base · 102M · N=30 · 1h+4h · RSI(Wilder) · Auto-refresh 1h</div>
+  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=100 · T=0.7 · Auto-refresh 1h</div>
 </div>
 <div class="coin-bar">
   <span class="coin-btn active" onclick="selectCoin('BTC')" id="btn-BTC">BTC</span>
@@ -101,11 +105,10 @@ canvas{width:100%!important;height:100%!important}
 <div class="content">
   <div class="status-row" id="statusRow"><span>⏳</span><span>Connecting…</span></div>
 
-  <!-- Computing screen -->
   <div class="computing-card" id="computingCard">
     <div class="computing-icon">🧠</div>
     <div class="computing-title" id="computingTitle">Computing Prediction</div>
-    <div class="computing-sub">Running <strong>Kronos-base 1h + 4h</strong>, on-chain, news &amp; technical analysis.<br><br>Estimated: <strong>~10 minutes</strong> on your machine.</div>
+    <div class="computing-sub" id="computingSub">Running Kronos-base N=100 Monte Carlo<br>+ ETF flows + funding rates + on-chain data</div>
     <div class="prog-bg"><div class="prog-fill" id="progFill"></div></div>
     <div class="prog-label" id="computingLabel">Please wait…</div>
     <div class="timer-box">
@@ -115,24 +118,23 @@ canvas{width:100%!important;height:100%!important}
     </div>
   </div>
 
-  <!-- Not started screen -->
   <div id="notStarted" class="hidden">
     <div class="computing-card">
       <div class="computing-icon">🔮</div>
       <div class="computing-title" id="notStartedTitle">No Prediction Yet</div>
-      <div class="computing-sub">Tap below to start. Takes ~10 min.</div>
+      <div class="computing-sub">Tap below to start Kronos-base prediction.</div>
       <br>
       <button class="btn-predict" id="btnStart" onclick="startPrediction()">Run Kronos Prediction</button>
     </div>
   </div>
 
-  <!-- Results -->
   <div id="results" class="hidden">
     <div class="badge-row" style="margin-bottom:4px">
       <span class="badge badge-orange hidden" id="refreshBadge"><div class="spinner"></div> Refreshing…</span>
     </div>
     <div class="updated" id="updatedTime"></div>
 
+    <!-- Primary: Kronos signal -->
     <div class="card">
       <div class="card-title">Kronos Model Signal (Primary)</div>
       <div class="metrics">
@@ -149,9 +151,14 @@ canvas{width:100%!important;height:100%!important}
         <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2)"><span>Bearish</span><span>Bullish</span></div>
         <div class="bar-bg"><div class="bar-fill" id="upsideBar" style="width:0%"></div></div>
       </div>
-      <div style="margin-top:10px;font-size:11px;color:var(--muted2);text-align:center" id="timeframeLabel"></div>
+      <div id="accuracyBox" class="accuracy-box hidden">
+        <div style="font-size:12px;color:var(--muted2)">Historical Accuracy (this coin)</div>
+        <div style="font-size:18px;font-weight:800;margin-top:4px" id="accuracyVal">—</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px" id="accuracyCount">—</div>
+      </div>
     </div>
 
+    <!-- Signal context -->
     <div class="card">
       <div class="card-title">Signal Context (Auxiliary Filters)</div>
       <div id="contextSummary" style="font-size:13px;font-weight:600;margin-bottom:10px"></div>
@@ -159,8 +166,9 @@ canvas{width:100%!important;height:100%!important}
       <div id="warnings"></div>
     </div>
 
+    <!-- Price target -->
     <div class="card">
-      <div class="card-title">24h Price Target (P10–P90)</div>
+      <div class="card-title">24h Price Target (P10–P90 · N=100)</div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
           <div style="font-size:28px;font-weight:800" id="targetPrice">—</div>
@@ -174,6 +182,7 @@ canvas{width:100%!important;height:100%!important}
       </div>
     </div>
 
+    <!-- Technical indicators -->
     <div class="card">
       <div class="card-title">Technical Indicators</div>
       <div class="ind-grid">
@@ -186,31 +195,35 @@ canvas{width:100%!important;height:100%!important}
       </div>
     </div>
 
+    <!-- Crypto-native signals -->
     <div class="card">
-      <div class="card-title">Additional Context</div>
+      <div class="card-title">Crypto-Native Signals</div>
       <div class="signal-grid">
-        <div class="signal-item"><div class="signal-val" id="newsVal">—</div><div class="signal-label">News</div></div>
+        <div class="signal-item"><div class="signal-val" id="fundingVal">—</div><div class="signal-label">Funding Rate</div></div>
+        <div class="signal-item" id="etfItem"><div class="signal-val" id="etfVal">—</div><div class="signal-label">ETF Flows</div></div>
         <div class="signal-item"><div class="signal-val" id="memVal">—</div><div class="signal-label">Mempool</div></div>
-        <div class="signal-item"><div class="signal-val" id="txVal">—</div><div class="signal-label">24h Txns</div></div>
-        <div class="signal-item" id="domItem" class="hidden"><div class="signal-val" id="domVal">—</div><div class="signal-label">BTC Dom</div></div>
+        <div class="signal-item" id="domItem"><div class="signal-val" id="domVal">—</div><div class="signal-label">BTC Dominance</div></div>
       </div>
     </div>
 
+    <!-- Chart -->
     <div class="card">
       <div class="card-title">Forecast Chart (24h)</div>
       <div class="chart-wrap"><canvas id="chart"></canvas></div>
     </div>
 
+    <!-- Table -->
     <div class="card">
       <div class="card-title">Hourly Breakdown</div>
       <table class="table">
-        <thead><tr><th>Hour</th><th>Ensemble Price</th><th style="text-align:right">P90 / P10</th></tr></thead>
+        <thead><tr><th>Hour</th><th>Mean Price</th><th style="text-align:right">P90 / P10</th></tr></thead>
         <tbody id="tableBody"></tbody>
       </table>
     </div>
 
-    <div class="badge-row" style="padding:4px 0">
-      <span class="badge badge-blue">Kronos-base · 102.3M · N=30 · T=0.7 · RSI(Wilder) · P10/P90</span>
+    <div class="badge-row" style="padding:4px 0;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+      <span class="badge badge-blue" id="deviceBadge">🧠 Kronos-base · N=100</span>
+      <span class="badge badge-purple" id="gpuBadge" style="display:none">⚡ GPU Active</span>
     </div>
     <button class="btn-predict" onclick="startPrediction()" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);margin-top:4px">🔄 Request Fresh Prediction</button>
   </div>
@@ -246,7 +259,7 @@ function startTimer() {
     var tr = document.getElementById('timerRemaining');
     var pf = document.getElementById('progFill');
     if (te) te.textContent = em + ':' + es + ' elapsed';
-    if (tr) tr.textContent = remaining > 0 ? '~' + rm + ':' + rs + ' remaining' : 'Almost done — finalizing…';
+    if (tr) tr.textContent = remaining > 0 ? '~' + rm + ':' + rs + ' remaining' : 'Almost done…';
     if (pf) pf.style.width = Math.min(95, (elapsed/ESTIMATED_SECS)*100) + '%';
   }, 1000);
 }
@@ -261,7 +274,7 @@ function livePx() {
     .then(function(d) {
       var p = parseFloat(d.price);
       var dec = p < 1 ? 6 : p < 100 ? 4 : 2;
-      document.getElementById('livePrice').textContent = '$' + p.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
+      document.getElementById('livePrice').textContent = '$' + p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:dec});
       document.getElementById('priceLabel').textContent = currentCoin + ' / USDT';
     }).catch(function(){});
 }
@@ -273,7 +286,10 @@ function checkStatus() {
       statusData = d;
       var el = document.getElementById('statusRow');
       if (d.model_ready) {
-        el.innerHTML = '<span>✅</span><span>Kronos-base loaded and ready</span>';
+        var dev = d.device === 'directml' ? '⚡ Intel Arc GPU' : d.device === 'cuda' ? '⚡ NVIDIA GPU' : '💻 CPU';
+        el.innerHTML = '<span>✅</span><span>Kronos-base ready · ' + dev + ' · N=' + (d.monte_carlo_n||100) + '</span>';
+        var sub = document.getElementById('headerSub');
+        if (sub) sub.textContent = 'Kronos-base · 102M · N=' + (d.monte_carlo_n||100) + ' · ' + dev + ' · Auto-refresh 1h';
         updateCoinButtons();
         showCoinState();
       } else if (d.model_error) {
@@ -309,7 +325,7 @@ function showCoinState() {
     document.getElementById(id).classList.add('hidden');
   });
   var isRunning = statusData.running && statusData.running[currentCoin];
-  var isCached = statusData.cached && statusData.cached.indexOf(currentCoin) >= 0;
+  var isCached  = statusData.cached && statusData.cached.indexOf(currentCoin) >= 0;
   if (isRunning) {
     document.getElementById('computingCard').classList.remove('hidden');
     document.getElementById('computingTitle').textContent = 'Computing ' + currentCoin + '…';
@@ -350,9 +366,7 @@ function loadCache() {
     .then(function(d) {
       if (d.error) { showCoinState(); return; }
       showResults(d);
-    }).catch(function(e) {
-      console.error('loadCache error:', e);
-    });
+    }).catch(function(e) { console.error('loadCache:', e); });
 }
 
 function startPrediction() {
@@ -362,14 +376,15 @@ function startPrediction() {
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (btn) { btn.textContent = 'Run Kronos Prediction'; btn.disabled = false; }
-      // Show computing card immediately — coin is queued even if not yet running
       ['computingCard','notStarted','results'].forEach(function(id) {
         document.getElementById(id).classList.add('hidden');
       });
       document.getElementById('computingCard').classList.remove('hidden');
       document.getElementById('computingTitle').textContent = currentCoin + ' — Queued';
-      document.getElementById('computingLabel').textContent = 'Waiting for current prediction to finish, then will start automatically…';
-      // Start polling to detect when it starts/finishes
+      document.getElementById('computingLabel').textContent =
+        d.status === 'already_running_or_queued'
+          ? 'Already computing — please wait…'
+          : 'Queued — will start after current prediction finishes…';
       startPolling();
     }).catch(function() {
       if (btn) { btn.textContent = '❌ Error — try again'; btn.disabled = false; }
@@ -383,32 +398,32 @@ function showResults(d) {
   stopTimer();
   document.getElementById('results').classList.remove('hidden');
 
+  // Refresh badge
   var rb = document.getElementById('refreshBadge');
   if (d.is_running) rb.classList.remove('hidden');
   else rb.classList.add('hidden');
 
-  document.getElementById('updatedTime').textContent = 'Last updated: ' + new Date(d.updated_at).toLocaleString();
-
-  // Show staleness info
-  var staleEl = document.getElementById('updatedTime');
+  // Staleness
   var ageText = '';
   if (d.age_minutes !== undefined) {
-    if (d.age_minutes < 1) ageText = ' · Just updated';
-    else if (d.age_minutes === 1) ageText = ' · 1 min ago';
-    else ageText = ' · ' + d.age_minutes + ' min ago';
-    if (d.next_refresh_mins !== undefined && d.next_refresh_mins > 0) {
-      ageText += ' · next refresh in ' + d.next_refresh_mins + ' min';
-    }
-    if (d.is_stale) ageText += ' ⚠️ stale';
+    ageText = d.age_minutes < 1 ? ' · Just updated' :
+              d.age_minutes === 1 ? ' · 1 min ago' : ' · ' + d.age_minutes + ' min ago';
+    if (d.next_refresh_mins > 0) ageText += ' · refresh in ' + d.next_refresh_mins + 'min';
   }
-  staleEl.textContent = 'Last updated: ' + new Date(d.updated_at).toLocaleString() + ageText;
+  var staleHtml = d.is_stale ? ' <span class="stale-warn">⚠️ Stale</span>' : '';
+  document.getElementById('updatedTime').innerHTML =
+    'Last updated: ' + new Date(d.updated_at).toLocaleString() + ageText + staleHtml;
 
-  // Show error if last prediction failed
-  if (d.last_error) {
-    var errDiv = document.getElementById('contextSummary');
-    if (errDiv) errDiv.innerHTML = '<span style="color:var(--red)">⚠️ Last prediction had an error: ' + d.last_error + '</span>';
+  // Device badge
+  var db = document.getElementById('deviceBadge');
+  var gb = document.getElementById('gpuBadge');
+  if (d.device && d.device !== 'cpu') {
+    gb.style.display = 'inline-flex';
+    gb.textContent = d.device === 'directml' ? '⚡ Intel Arc GPU' : '⚡ NVIDIA GPU';
   }
+  if (db) db.textContent = '🧠 Kronos-base · 102.3M · N=' + (d.monte_carlo_n||100) + ' · T=0.7 · P10/P90';
 
+  // Upside
   var up = d.upside_prob;
   var uEl = document.getElementById('upsideVal');
   uEl.textContent = up.toFixed(1) + '%';
@@ -417,38 +432,49 @@ function showResults(d) {
   bar.style.width = up + '%';
   bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)';
 
+  // Confidence
   var conf = d.confidence || 50;
   var confEl = document.getElementById('confidenceVal');
   confEl.textContent = conf.toFixed(0) + '%';
   confEl.className = 'metric-value ' + (conf >= 70 ? 'up' : conf >= 40 ? 'warn' : 'down');
 
-  var tlEl = document.getElementById('timeframeLabel');
-  tlEl.textContent = d.has_4h ? '✅ 1h + 4h ensemble active' : '⚠️ 1h only';
+  // Accuracy
+  if (d.accuracy && d.accuracy.total > 0) {
+    document.getElementById('accuracyBox').classList.remove('hidden');
+    var accEl = document.getElementById('accuracyVal');
+    accEl.textContent = d.accuracy.pct + '%';
+    accEl.style.color = d.accuracy.pct >= 55 ? 'var(--green)' : d.accuracy.pct >= 45 ? 'var(--orange)' : 'var(--red)';
+    document.getElementById('accuracyCount').textContent =
+      d.accuracy.correct + ' correct out of ' + d.accuracy.total + ' predictions tracked';
+  }
 
+  // Signal context
   if (d.signal_context) {
     var sc = d.signal_context;
     var sumEl = document.getElementById('contextSummary');
     sumEl.textContent = sc.context;
-    sumEl.style.color = sc.n_confirm > sc.n_warn ? 'var(--green)' : sc.n_warn > sc.n_confirm ? 'var(--orange)' : 'var(--muted2)';
-    var confDiv = document.getElementById('confirmations');
-    confDiv.innerHTML = '';
+    sumEl.style.color = sc.n_confirm > sc.n_warn ? 'var(--green)' :
+                        sc.n_warn > sc.n_confirm ? 'var(--orange)' : 'var(--muted2)';
+    var cDiv = document.getElementById('confirmations');
+    cDiv.innerHTML = '';
     (sc.confirmations || []).forEach(function(c) {
-      confDiv.innerHTML += '<div class="context-item"><span style="color:var(--green)">✓</span><span>' + c + '</span></div>';
+      cDiv.innerHTML += '<div class="context-item"><span style="color:var(--green)">✓</span><span>' + c + '</span></div>';
     });
-    var warnDiv = document.getElementById('warnings');
-    warnDiv.innerHTML = '';
+    var wDiv = document.getElementById('warnings');
+    wDiv.innerHTML = '';
     (sc.warnings || []).forEach(function(w) {
-      warnDiv.innerHTML += '<div class="context-item"><span style="color:var(--orange)">⚠</span><span>' + w + '</span></div>';
+      wDiv.innerHTML += '<div class="context-item"><span style="color:var(--orange)">⚠</span><span>' + w + '</span></div>';
     });
     if (!sc.confirmations.length && !sc.warnings.length) {
-      confDiv.innerHTML = '<div class="context-item"><span style="color:var(--muted2)">—</span><span style="color:var(--muted2)">No strong signals</span></div>';
+      cDiv.innerHTML = '<div class="context-item"><span style="color:var(--muted2)">—</span><span style="color:var(--muted2)">No strong auxiliary signals</span></div>';
     }
   }
 
+  // Price target
   var fc = d.forecast;
-  var lastMean = fc.mean_close[fc.mean_close.length - 1];
-  var lastHigh = fc.upper[fc.upper.length - 1];
-  var lastLow  = fc.lower[fc.lower.length - 1];
+  var lastMean = fc.mean_close[fc.mean_close.length-1];
+  var lastHigh = fc.upper[fc.upper.length-1];
+  var lastLow  = fc.lower[fc.lower.length-1];
   var chg = ((lastMean - d.last_price) / d.last_price * 100);
   document.getElementById('targetPrice').textContent = fmt(lastMean);
   var cEl = document.getElementById('targetChange');
@@ -457,6 +483,7 @@ function showResults(d) {
   document.getElementById('tHigh').textContent = '▲ ' + fmt(lastHigh);
   document.getElementById('tLow').textContent  = '▼ ' + fmt(lastLow);
 
+  // Technical indicators
   if (d.indicators) {
     var ind = d.indicators;
     var rsi = ind.rsi;
@@ -471,7 +498,10 @@ function showResults(d) {
     var bbEl = document.getElementById('bbVal');
     bbEl.textContent = bb.toFixed(0) + '%';
     bbEl.className = 'ind-val ' + (bb < 20 ? 'up' : bb > 80 ? 'down' : 'warn');
-    document.getElementById('volRatioVal').textContent = ind.vol_ratio.toFixed(2) + 'x';
+    var vr = ind.vol_ratio;
+    var vrEl = document.getElementById('volRatioVal');
+    vrEl.textContent = vr.toFixed(2) + 'x';
+    vrEl.className = 'ind-val ' + (!ind.vol_valid ? 'warn' : vr > 1.5 ? 'up' : '');
     document.getElementById('sma20Val').textContent = fmt(ind.sma20);
   }
 
@@ -482,20 +512,29 @@ function showResults(d) {
     fgEl.className = 'ind-val ' + (fg.value >= 60 ? 'up' : fg.value <= 30 ? 'down' : 'warn');
   }
 
-  if (d.news) {
-    var newsEl = document.getElementById('newsVal');
-    newsEl.textContent = d.news.label;
-    newsEl.className = 'signal-val ' + (d.news.score > 10 ? 'up' : d.news.score < -10 ? 'down' : 'warn');
+  // Crypto-native signals
+  if (d.funding) {
+    var fundEl = document.getElementById('fundingVal');
+    fundEl.textContent = d.funding.rate.toFixed(3) + '% · ' + d.funding.label;
+    fundEl.className = 'signal-val ' +
+      (d.funding.label === 'Overcrowded Longs' ? 'warn' :
+       d.funding.label === 'Overcrowded Shorts' ? 'up' : '');
   }
 
-  if (d.onchain) {
-    document.getElementById('memVal').textContent = (d.onchain.mempool_size || 0).toLocaleString() + ' ' + (d.onchain.mempool_label || '');
-    document.getElementById('txVal').textContent = (d.onchain.tx_count || 0).toLocaleString();
+  if (d.etf_flows && d.etf_flows.total !== null) {
+    var etfEl = document.getElementById('etfVal');
+    etfEl.textContent = (d.etf_flows.total > 0 ? '+' : '') + d.etf_flows.total.toFixed(0) + 'M · ' + d.etf_flows.label;
+    etfEl.className = 'signal-val ' + (d.etf_flows.total > 0 ? 'up' : 'down');
+    document.getElementById('etfItem').classList.remove('hidden');
+  }
+
+  if (d.onchain && d.onchain.mempool_size !== undefined) {
+    document.getElementById('memVal').textContent =
+      (d.onchain.mempool_size || 0).toLocaleString() + ' · ' + (d.onchain.mempool_label || '');
   }
 
   if (d.btc_dominance) {
     document.getElementById('domVal').textContent = d.btc_dominance.toFixed(1) + '%';
-    document.getElementById('domItem').classList.remove('hidden');
   }
 
   drawChart(d);
@@ -512,10 +551,14 @@ function buildTable(d) {
     var m = fc.mean_close[i], hi = fc.upper[i], lo = fc.lower[i];
     var chg = ((m - d.last_price) / d.last_price * 100);
     var tr = document.createElement('tr');
-    tr.innerHTML = '<td><span class="hbadge">+' + (i+1) + 'h</span></td>'
-      + '<td style="font-weight:600;color:' + (chg>=0?'var(--green)':'var(--red)') + '">' + fmt(m)
-      + '<span style="font-size:10px;color:var(--muted2)">&nbsp;' + (chg>=0?'+':'') + chg.toFixed(1) + '%</span></td>'
-      + '<td style="font-size:11px;text-align:right"><span style="color:var(--green)">▲' + fmt(hi) + '</span><br><span style="color:var(--red)">▼' + fmt(lo) + '</span></td>';
+    tr.innerHTML =
+      '<td><span class="hbadge">+' + (i+1) + 'h</span></td>' +
+      '<td style="font-weight:600;color:' + (chg>=0?'var(--green)':'var(--red)') + '">' +
+        fmt(m) + '<span style="font-size:10px;color:var(--muted2)">&nbsp;' +
+        (chg>=0?'+':'') + chg.toFixed(1) + '%</span></td>' +
+      '<td style="font-size:11px;text-align:right">' +
+        '<span style="color:var(--green)">▲' + fmt(hi) + '</span><br>' +
+        '<span style="color:var(--red)">▼' + fmt(lo) + '</span></td>';
     tb.appendChild(tr);
   });
 }

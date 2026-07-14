@@ -389,6 +389,26 @@ function showResults(d) {
 
   document.getElementById('updatedTime').textContent = 'Last updated: ' + new Date(d.updated_at).toLocaleString();
 
+  // Show staleness info
+  var staleEl = document.getElementById('updatedTime');
+  var ageText = '';
+  if (d.age_minutes !== undefined) {
+    if (d.age_minutes < 1) ageText = ' · Just updated';
+    else if (d.age_minutes === 1) ageText = ' · 1 min ago';
+    else ageText = ' · ' + d.age_minutes + ' min ago';
+    if (d.next_refresh_mins !== undefined && d.next_refresh_mins > 0) {
+      ageText += ' · next refresh in ' + d.next_refresh_mins + ' min';
+    }
+    if (d.is_stale) ageText += ' ⚠️ stale';
+  }
+  staleEl.textContent = 'Last updated: ' + new Date(d.updated_at).toLocaleString() + ageText;
+
+  // Show error if last prediction failed
+  if (d.last_error) {
+    var errDiv = document.getElementById('contextSummary');
+    if (errDiv) errDiv.innerHTML = '<span style="color:var(--red)">⚠️ Last prediction had an error: ' + d.last_error + '</span>';
+  }
+
   var up = d.upside_prob;
   var uEl = document.getElementById('upsideVal');
   uEl.textContent = up.toFixed(1) + '%';

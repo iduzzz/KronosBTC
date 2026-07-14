@@ -88,6 +88,7 @@ def init_db():
                 predicted_at     TEXT NOT NULL,
                 predicted_price  REAL NOT NULL,
                 upside_prob      REAL NOT NULL,
+                confidence       REAL NOT NULL DEFAULT 0,
                 actual_price     REAL,
                 direction_correct INTEGER,
                 checked_at       TEXT
@@ -105,10 +106,11 @@ def save_prediction(symbol, result):
                     VALUES (?, ?, ?, NULL)
                 """, (symbol, json.dumps(result), result["updated_at"]))
                 target = result["forecast"]["mean_close"][-1]
+                conf   = result.get("confidence", 0)
                 conn.execute("""
-                    INSERT INTO accuracy (symbol, predicted_at, predicted_price, upside_prob)
-                    VALUES (?, ?, ?, ?)
-                """, (symbol, result["updated_at"], target, result["upside_prob"]))
+                    INSERT INTO accuracy (symbol, predicted_at, predicted_price, upside_prob, confidence)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (symbol, result["updated_at"], target, result["upside_prob"], conf))
                 conn.commit()
         with cache_lock:
             cache[symbol] = result
@@ -171,15 +173,49 @@ def check_accuracy():
 def get_accuracy_stats():
     try:
         with sqlite3.connect(DB_FILE) as conn:
+            # Overall per-symbol stats
             rows = conn.execute("""
                 SELECT symbol, COUNT(*) as total, SUM(direction_correct) as correct
                 FROM accuracy WHERE direction_correct IS NOT NULL
                 GROUP BY symbol
             """).fetchall()
-        return {s: {"total": t, "correct": c, "pct": round(c/t*100, 1)}
-                for s, t, c in rows if t > 0}
+
+            # Confidence-bucketed stats (all symbols combined)
+            bucket_rows = conn.execute("""
+                SELECT
+                    CASE
+                        WHEN confidence >= 80 THEN 'high'
+                        WHEN confidence >= 60 THEN 'medium'
+                        ELSE 'low'
+                    END as bucket,
+                    COUNT(*) as total,
+                    SUM(direction_correct) as correct
+                FROM accuracy
+                WHERE direction_correct IS NOT NULL
+                GROUP BY bucket
+            """).fetchall()
+
+        stats = {s: {"total": t, "correct": c, "pct": round(c/t*100, 1)}
+                 for s, t, c in rows if t > 0}
+
+        # Add confidence breakdown
+        conf_stats = {}
+        for bucket, total, correct in bucket_rows:
+            if total > 0:
+                conf_stats[bucket] = {
+                    "total":   total,
+                    "correct": correct,
+                    "pct":     round(correct/total*100, 1),
+                    "label":   {
+                        "high":   "High confidence (≥80%)",
+                        "medium": "Medium confidence (60-80%)",
+                        "low":    "Low confidence (<60%)"
+                    }.get(bucket, bucket)
+                }
+
+        return {"by_coin": stats, "by_confidence": conf_stats}
     except Exception:
-        return {}
+        return {"by_coin": {}, "by_confidence": {}}
 
 
 # ── Worker (fixed requeue fragility) ──────────────────────────────────────────
@@ -567,7 +603,7 @@ def run_prediction(symbol):
         "etf_flows":     sig["etf_flows"],
         "onchain":       sig["onchain"],
         "btc_dominance": sig["btc_dominance"],
-        "accuracy":      get_accuracy_stats().get(symbol, {}),
+        "accuracy":      get_accuracy_stats().get("by_coin", {}).get(symbol, {}),
         "forecast": {
             "timestamps": [str(t) for t in pred["future_times"]],
             "mean_close": [round(v, 4) for v in mean_close.tolist()],
@@ -658,7 +694,7 @@ def status():
         "running":       {k: v for k, v in running.items() if v},
         "running_since": {k: v for k, v in running_since.items() if running.get(k)},
         "progress":      progress,
-        "accuracy":      get_accuracy_stats(),
+        "accuracy":      get_accuracy_stats().get("by_coin", {}),
     })
 
 @app.route("/cache/<symbol>")

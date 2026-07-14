@@ -238,34 +238,40 @@ var pollTimer = null;
 var statusData = {};
 var timerInterval = null;
 var timerStartedAt = null;
-var ESTIMATED_SECS = 10 * 60;
-
-function fmt(v) {
-  var dec = v < 1 ? 6 : v < 100 ? 4 : 2;
-  return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
-}
 
 function startTimer() {
   if (timerInterval) return;
   timerStartedAt = Date.now();
   timerInterval = setInterval(function() {
-    var elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
-    var remaining = Math.max(0, ESTIMATED_SECS - elapsed);
-    var em = String(Math.floor(elapsed/60)).padStart(2,'0');
-    var es = String(elapsed%60).padStart(2,'0');
-    var rm = String(Math.floor(remaining/60)).padStart(2,'0');
-    var rs = String(remaining%60).padStart(2,'0');
+    var prog = statusData.progress && statusData.progress[currentCoin];
     var te = document.getElementById('timerDisplay');
     var tr = document.getElementById('timerRemaining');
     var pf = document.getElementById('progFill');
+    var elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+    var em = String(Math.floor(elapsed/60)).padStart(2,'0');
+    var es = String(elapsed%60).padStart(2,'0');
     if (te) te.textContent = em + ':' + es + ' elapsed';
-    if (tr) tr.textContent = remaining > 0 ? '~' + rm + ':' + rs + ' remaining' : 'Almost done…';
-    if (pf) pf.style.width = Math.min(95, (elapsed/ESTIMATED_SECS)*100) + '%';
+    if (prog && prog.total > 0) {
+      var remSecs = Math.max(0, prog.remaining_secs);
+      var rm = String(Math.floor(remSecs/60)).padStart(2,'0');
+      var rs = String(Math.floor(remSecs%60)).padStart(2,'0');
+      if (tr) tr.textContent = 'MC ' + prog.current + '/' + prog.total +
+        ' · ' + prog.secs_per_run.toFixed(1) + 's/run · ~' + rm + ':' + rs + ' remaining';
+      if (pf) pf.style.width = prog.pct + '%';
+    } else {
+      if (tr) tr.textContent = running ? 'Fetching data & preparing…' : 'Waiting to start…';
+      if (pf) pf.style.width = '3%';
+    }
   }, 1000);
 }
 
 function stopTimer() {
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; timerStartedAt = null; }
+}
+
+function fmt(v) {
+  var dec = v < 1 ? 6 : v < 100 ? 4 : 2;
+  return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
 }
 
 function livePx() {
@@ -357,7 +363,7 @@ function startPolling() {
           }
         }
       }).catch(function(){});
-  }, 15000);
+  }, 5000); // Poll every 5s during computation for real-time progress
 }
 
 function loadCache() {

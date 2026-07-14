@@ -553,11 +553,11 @@ def load_model():
 
         # Fix 4: Dynamic N based on device
         if gpu_working:
-            MONTE_CARLO_N = 100
-            print(f"[Kronos] GPU detected — using N={MONTE_CARLO_N}", flush=True)
+            MONTE_CARLO_N = 50
+            print(f"[Kronos] GPU connected but KronosPredictor uses CPU tensors internally — using N={MONTE_CARLO_N}", flush=True)
         else:
             MONTE_CARLO_N = 50
-            print(f"[Kronos] CPU mode — using N={MONTE_CARLO_N} for reasonable speed", flush=True)
+            print(f"[Kronos] CPU mode — using N={MONTE_CARLO_N}", flush=True)
 
         predictor   = KronosPredictor(model, tokenizer, max_context=512)
         model_ready = True

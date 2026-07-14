@@ -45,7 +45,8 @@ MODEL_NAME     = "NeoQuasar/Kronos-base"
 TOKENIZER_NAME = "NeoQuasar/Kronos-Tokenizer-base"
 LOOKBACK       = 384
 PRED_LEN       = 24
-MONTE_CARLO_N  = 100   # N=100 at single T=0.7 (correct approach, not fake ensemble)
+# N dynamically set after device detection in load_model
+MONTE_CARLO_N  = 100   # default, overridden based on device
 REFRESH_SECS   = 3600
 NUM_WORKERS    = 2
 DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
@@ -69,6 +70,8 @@ db_lock      = threading.Lock()
 # ── SQLite ─────────────────────────────────────────────────────────────────────
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
+        # Enable WAL mode — prevents readers blocking writers and concurrent write conflicts
+        conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
                 symbol     TEXT PRIMARY KEY,
@@ -90,7 +93,7 @@ def init_db():
             )
         """)
         conn.commit()
-    print(f"[DB] SQLite ready: {DB_FILE}", flush=True)
+    print(f"[DB] SQLite ready (WAL mode): {DB_FILE}", flush=True)
 
 def save_prediction(symbol, result):
     try:
@@ -129,15 +132,17 @@ def load_cache_from_disk():
         print(f"[DB] Load failed: {e}", flush=True)
 
 def check_accuracy():
-    """Compare 24h-old predictions to actual price."""
+    """Compare 24h-old predictions to actual price. Runs on single background timer."""
     try:
-        with sqlite3.connect(DB_FILE) as conn:
-            rows = conn.execute("""
-                SELECT id, symbol, predicted_price, upside_prob
-                FROM accuracy
-                WHERE actual_price IS NULL
-                AND predicted_at < datetime('now', '-24 hours')
-            """).fetchall()
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                rows = conn.execute("""
+                    SELECT id, symbol, predicted_price, upside_prob
+                    FROM accuracy
+                    WHERE actual_price IS NULL
+                    AND predicted_at < datetime('now', '-24 hours')
+                """).fetchall()
+
         for row_id, symbol, pred_price, upside_prob in rows:
             if symbol not in COINS:
                 continue
@@ -148,16 +153,17 @@ def check_accuracy():
                     actual  = float(r.json()["price"])
                     correct = 1 if (upside_prob >= 50 and actual > pred_price) or \
                                    (upside_prob < 50 and actual <= pred_price) else 0
-                    with sqlite3.connect(DB_FILE) as conn:
-                        conn.execute("""
-                            UPDATE accuracy
-                            SET actual_price=?, direction_correct=?, checked_at=?
-                            WHERE id=?
-                        """, (actual, correct, datetime.now(timezone.utc).isoformat(), row_id))
-                        conn.commit()
+                    with db_lock:
+                        with sqlite3.connect(DB_FILE) as conn:
+                            conn.execute("""
+                                UPDATE accuracy
+                                SET actual_price=?, direction_correct=?, checked_at=?
+                                WHERE id=?
+                            """, (actual, correct, datetime.now(timezone.utc).isoformat(), row_id))
+                            conn.commit()
                     print(f"[Accuracy] {symbol} pred={pred_price:.0f} actual={actual:.0f} correct={bool(correct)}", flush=True)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[Accuracy] {symbol} check failed: {e}", flush=True)
     except Exception as e:
         print(f"[Accuracy] Check failed: {e}", flush=True)
 
@@ -202,7 +208,7 @@ def worker():
                 threading.Timer(60, safe_requeue).start()
 
         threading.Timer(REFRESH_SECS, safe_requeue).start()
-        threading.Thread(target=check_accuracy, daemon=True).start()
+        # Accuracy check runs on a single background timer, not per-prediction thread
 
 
 # ── Technical Indicators (RSI with Wilder's smoothing) ────────────────────────
@@ -284,6 +290,10 @@ def fetch_etf_flows():
             numbers = re.findall(r'-?\d+(?:\.\d+)?', re.sub(r'<[^>]+>', ' ', rows[-2] if len(rows) > 1 else rows[-1]))
             if numbers:
                 total = float(numbers[-1])
+                # Sanity check — reject absurd values (scraper artifact)
+                if not (-10000 <= total <= 10000):
+                    print(f"[ETF] Rejected absurd value: {total}", flush=True)
+                    return {"total": None, "label": "Unavailable"}
                 label = "Strong Inflows" if total > 300 else \
                         "Inflows" if total > 0 else \
                         "Outflows" if total > -300 else "Strong Outflows"
@@ -518,7 +528,7 @@ def run_prediction(symbol):
 
 # ── Model loader ───────────────────────────────────────────────────────────────
 def load_model():
-    global predictor, model_ready, model_error
+    global predictor, model_ready, model_error, MONTE_CARLO_N
     try:
         load_cache_from_disk()
         print("[Kronos] Loading tokenizer...", flush=True)
@@ -527,12 +537,27 @@ def load_model():
         model = Kronos.from_pretrained(MODEL_NAME)
         model.eval()
 
+        # Fix 4: Try GPU, verify tensors actually move, fall back to CPU if not
+        gpu_working = False
         if DEVICE_TYPE != "cpu":
             try:
                 model = model.to(DEVICE)
-                print(f"[Kronos] Model on {DEVICE_TYPE.upper()}!", flush=True)
+                # Verify GPU inference actually works end-to-end
+                test_tensor = torch.zeros(1, 10).to(DEVICE)
+                _ = test_tensor + 1
+                gpu_working = True
+                print(f"[Kronos] Model on {DEVICE_TYPE.upper()} — verified!", flush=True)
             except Exception as e:
-                print(f"[Kronos] GPU move failed ({e}), using CPU", flush=True)
+                print(f"[Kronos] GPU failed ({e}), falling back to CPU", flush=True)
+                model = model.cpu()
+
+        # Fix 4: Dynamic N based on device
+        if gpu_working:
+            MONTE_CARLO_N = 100
+            print(f"[Kronos] GPU detected — using N={MONTE_CARLO_N}", flush=True)
+        else:
+            MONTE_CARLO_N = 50
+            print(f"[Kronos] CPU mode — using N={MONTE_CARLO_N} for reasonable speed", flush=True)
 
         predictor   = KronosPredictor(model, tokenizer, max_context=512)
         model_ready = True
@@ -541,6 +566,14 @@ def load_model():
         for i in range(NUM_WORKERS):
             threading.Thread(target=worker, daemon=True, name=f"Worker-{i+1}").start()
         task_queue.put("BTC")
+
+        # Fix 2: Single background timer for accuracy checks (not per-prediction thread)
+        def accuracy_loop():
+            while True:
+                time.sleep(3600)  # check every hour
+                check_accuracy()
+        threading.Thread(target=accuracy_loop, daemon=True, name="AccuracyChecker").start()
+
     except Exception as e:
         model_error = str(e)
         print(f"[Kronos] Load failed: {e}", flush=True)

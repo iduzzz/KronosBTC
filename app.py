@@ -10,7 +10,8 @@ import xml.etree.ElementTree as ET
 sys.path.insert(0, '/opt/kronosbtc')
 from model import Kronos, KronosTokenizer, KronosPredictor
 
-app = Flask(__name__, static_folder='/opt/kronosbtc/static')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+app = Flask(__name__, static_folder=os.path.join(BASE_DIR, 'static'))
 CORS(app)
 
 MODEL_NAME     = "NeoQuasar/Kronos-base"
@@ -20,7 +21,7 @@ LOOKBACK_4H    = 384
 PRED_LEN       = 24
 MONTE_CARLO_N  = 30
 REFRESH_SECS   = 3600
-CACHE_FILE     = "/opt/kronosbtc/cache.json"
+CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache.json")
 
 COINS = {
     "BTC": "BTCUSDT", "ETH": "ETHUSDT", "BNB": "BNBUSDT", "SOL": "SOLUSDT",
@@ -52,9 +53,13 @@ def worker():
             traceback.print_exc()
         finally:
             running[symbol] = False
-        print(f"[Kronos] {symbol} next refresh in 1h...", flush=True)
-        time.sleep(REFRESH_SECS)
-        task_queue.put(symbol)
+        # Re-queue after REFRESH_SECS using non-blocking timer
+        def requeue(s=symbol):
+            print(f"[Kronos] Auto-refresh: re-queuing {s}", flush=True)
+            if s not in list(task_queue.queue):
+                task_queue.put(s)
+        threading.Timer(REFRESH_SECS, requeue).start()
+        print(f"[Kronos] {symbol} done. Next auto-refresh in {REFRESH_SECS//60}min.", flush=True)
 
 
 # ── Cache persistence ──────────────────────────────────────────────────────────
@@ -494,7 +499,7 @@ threading.Thread(target=load_model, daemon=True).start()
 
 @app.route("/")
 def index():
-    return send_from_directory("/opt/kronosbtc/static", "index.html")
+    return send_from_directory(os.path.join(BASE_DIR, 'static'), "index.html")
 
 @app.route("/status")
 def status():

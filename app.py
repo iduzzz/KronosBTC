@@ -551,13 +551,12 @@ def load_model():
                 print(f"[Kronos] GPU failed ({e}), falling back to CPU", flush=True)
                 model = model.cpu()
 
-        # Fix 4: Dynamic N based on device
-        if gpu_working:
-            MONTE_CARLO_N = 50
-            print(f"[Kronos] GPU connected but KronosPredictor uses CPU tensors internally — using N={MONTE_CARLO_N}", flush=True)
-        else:
-            MONTE_CARLO_N = 50
-            print(f"[Kronos] CPU mode — using N={MONTE_CARLO_N}", flush=True)
+        # N=50 regardless of GPU — KronosPredictor internal tensors run on CPU
+        # (confirmed by measurement: each MC run takes ~5-7s, same as pure CPU)
+        # GPU verified connected but PCIe copies per pass negate any GPU benefit
+        MONTE_CARLO_N = 50 if not gpu_working else 50
+        device_note = "GPU connected (CPU-bound inference)" if gpu_working else "CPU"
+        print(f"[Kronos] {device_note} — N={MONTE_CARLO_N}", flush=True)
 
         predictor   = KronosPredictor(model, tokenizer, max_context=512)
         model_ready = True

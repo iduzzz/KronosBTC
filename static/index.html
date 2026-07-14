@@ -710,16 +710,54 @@ function loadAccuracy() {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       var el = document.getElementById('accuracyList');
-      var keys = Object.keys(data);
+      var byCoin = data.by_coin || {};
+      var byConf = data.by_confidence || {};
+      var keys = Object.keys(byCoin);
+
       if (keys.length === 0) {
         el.innerHTML = '<div class="acc-empty">🕐 No accuracy data yet.<br><br>After 24 hours, the app automatically checks whether each prediction was correct and logs it here.<br><br>Check back tomorrow.</div>';
         return;
       }
-      // Sort by total predictions descending
-      keys.sort(function(a,b) { return data[b].total - data[a].total; });
-      var html = '';
+
+      // Overall stats
+      var totalAll = keys.reduce(function(s,k){return s+byCoin[k].total;}, 0);
+      var correctAll = keys.reduce(function(s,k){return s+byCoin[k].correct;}, 0);
+      var overallPct = totalAll > 0 ? (correctAll/totalAll*100).toFixed(1) : '—';
+      var overallColor = parseFloat(overallPct) >= 55 ? 'var(--green)' : parseFloat(overallPct) >= 45 ? 'var(--orange)' : 'var(--red)';
+
+      var html = '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;text-align:center">' +
+        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Overall Directional Accuracy</div>' +
+        '<div style="font-size:36px;font-weight:800;color:' + overallColor + '">' + overallPct + '%</div>' +
+        '<div style="font-size:12px;color:var(--muted2);margin-top:4px">' + correctAll + ' correct out of ' + totalAll + ' predictions</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% · Good model ≥ 55%</div>' +
+      '</div>';
+
+      // Confidence buckets — the key insight
+      var confKeys = ['high', 'medium', 'low'];
+      var confLabels = {high: '🟢 High Confidence (≥80%)', medium: '🟡 Medium (60–80%)', low: '🔴 Low (<60%)'};
+      var hasConf = confKeys.some(function(k){ return byConf[k]; });
+      if (hasConf) {
+        html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">';
+        html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Accuracy by Confidence Level</div>';
+        html += '<div style="font-size:11px;color:var(--muted2);margin-bottom:8px">Does high model confidence = more accurate? Find out here.</div>';
+        confKeys.forEach(function(k) {
+          var b = byConf[k];
+          if (!b) return;
+          var bColor = b.pct >= 55 ? 'var(--green)' : b.pct >= 45 ? 'var(--orange)' : 'var(--red)';
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--border)">' +
+            '<div><div style="font-size:12px;font-weight:600">' + confLabels[k] + '</div>' +
+            '<div style="font-size:11px;color:var(--muted2)">' + b.correct + '/' + b.total + ' correct</div></div>' +
+            '<div style="font-size:18px;font-weight:800;color:' + bColor + '">' + b.pct + '%</div>' +
+          '</div>';
+        });
+        html += '</div>';
+      }
+
+      // Per-coin stats
+      html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">By Coin</div>';
+      keys.sort(function(a,b){ return byCoin[b].total - byCoin[a].total; });
       keys.forEach(function(sym) {
-        var d = data[sym];
+        var d = byCoin[sym];
         var pct = d.pct;
         var color = pct >= 60 ? 'var(--green)' : pct >= 45 ? 'var(--orange)' : 'var(--red)';
         html += '<div class="acc-row">' +
@@ -734,19 +772,6 @@ function loadAccuracy() {
           '</div>' +
         '</div>';
       });
-
-      // Overall stats
-      var totalAll = keys.reduce(function(s,k){return s+data[k].total;}, 0);
-      var correctAll = keys.reduce(function(s,k){return s+data[k].correct;}, 0);
-      var overallPct = totalAll > 0 ? (correctAll/totalAll*100).toFixed(1) : '—';
-      var overallColor = parseFloat(overallPct) >= 55 ? 'var(--green)' : parseFloat(overallPct) >= 45 ? 'var(--orange)' : 'var(--red)';
-
-      html = '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;text-align:center">' +
-        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Overall Directional Accuracy</div>' +
-        '<div style="font-size:36px;font-weight:800;color:' + overallColor + '">' + overallPct + '%</div>' +
-        '<div style="font-size:12px;color:var(--muted2);margin-top:4px">' + correctAll + ' correct out of ' + totalAll + ' predictions</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% · Good model ≥ 55%</div>' +
-      '</div>' + html;
 
       el.innerHTML = html;
 

@@ -63,6 +63,7 @@ model_ready  = False
 model_error  = ""
 running      = {}
 running_since= {}
+progress     = {}   # symbol -> {"current": N, "total": N, "secs_per_run": float}
 task_queue   = queue.Queue()
 db_lock      = threading.Lock()
 
@@ -355,8 +356,8 @@ def fetch_candles(symbol, interval="1h", limit=384):
     raise RuntimeError(f"All Binance endpoints failed for {symbol} {interval}")
 
 
-# ── Kronos Monte Carlo (N=100, single T=0.7, correct approach) ────────────────
-def kronos_predict(df, pred_len=24):
+# ── Kronos Monte Carlo — N=50, T=0.7, with real-time progress tracking ────────
+def kronos_predict(df, symbol="UNK", pred_len=24):
     last_time   = df["timestamps"].iloc[-1]
     x_df        = df[["open","high","low","close","volume"]].copy()
     x_timestamp = df["timestamps"].copy().reset_index(drop=True)
@@ -367,17 +368,34 @@ def kronos_predict(df, pred_len=24):
     y_timestamp = pd.Series(future_times).reset_index(drop=True)
 
     all_closes = []
+    run_times  = []
+
     with torch.inference_mode():
         for i in range(MONTE_CARLO_N):
-            if i % 10 == 0:
-                print(f"[Kronos] MC {i+1}/{MONTE_CARLO_N}...", flush=True)
+            t_start = time.time()
             p = predictor.predict(
                 df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
                 pred_len=pred_len, T=0.7, top_p=0.9, sample_count=1
             )
+            elapsed = time.time() - t_start
+            run_times.append(elapsed)
             all_closes.append(p["close"].values)
 
+            # Update real-time progress
+            avg_secs = sum(run_times) / len(run_times)
+            remaining = (MONTE_CARLO_N - i - 1) * avg_secs
+            progress[symbol] = {
+                "current":      i + 1,
+                "total":        MONTE_CARLO_N,
+                "secs_per_run": round(avg_secs, 2),
+                "remaining_secs": round(remaining, 0),
+                "pct":          round((i + 1) / MONTE_CARLO_N * 100, 1),
+            }
+            if i % 10 == 0:
+                print(f"[Kronos] {symbol} MC {i+1}/{MONTE_CARLO_N} ({avg_secs:.1f}s/run, ~{remaining/60:.1f}min left)", flush=True)
+
     closes = np.array(all_closes)
+    progress.pop(symbol, None)  # clear when done
     return {
         "mean":        closes.mean(axis=0),
         "upper":       np.percentile(closes, 90, axis=0),
@@ -461,8 +479,8 @@ def run_prediction(symbol):
     st = threading.Thread(target=fetch_signals)
     st.start()
 
-    # Run Kronos (N=100, T=0.7)
-    pred = kronos_predict(df, pred_len=PRED_LEN)
+    # Run Kronos (N=50, T=0.7) with real-time progress tracking
+    pred = kronos_predict(df, symbol=symbol, pred_len=PRED_LEN)
 
     st.join()  # Wait for external signals
 
@@ -554,7 +572,7 @@ def load_model():
         # N=50 regardless of GPU — KronosPredictor internal tensors run on CPU
         # (confirmed by measurement: each MC run takes ~5-7s, same as pure CPU)
         # GPU verified connected but PCIe copies per pass negate any GPU benefit
-        MONTE_CARLO_N = 50 if not gpu_working else 50
+        MONTE_CARLO_N = 50
         device_note = "GPU connected (CPU-bound inference)" if gpu_working else "CPU"
         print(f"[Kronos] {device_note} — N={MONTE_CARLO_N}", flush=True)
 
@@ -598,6 +616,7 @@ def status():
         "cached":        list(cache.keys()),
         "running":       {k: v for k, v in running.items() if v},
         "running_since": {k: v for k, v in running_since.items() if running.get(k)},
+        "progress":      progress,
         "accuracy":      get_accuracy_stats(),
     })
 

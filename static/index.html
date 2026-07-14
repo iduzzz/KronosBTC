@@ -102,9 +102,14 @@ canvas{width:100%!important;height:100%!important}
   <div class="computing-card" id="computingCard">
     <div class="computing-icon">🧠</div>
     <div class="computing-title" id="computingTitle">Computing Prediction</div>
-    <div class="computing-sub">Running <strong>Kronos-base 1h + 4h</strong>, on-chain, news &amp; technical analysis.<br><br>First run takes <strong>~90 minutes</strong>.<br>After that results are <strong>instant</strong> from cache.</div>
-    <div class="prog-bg"><div class="prog-fill"></div></div>
+    <div class="computing-sub">Running <strong>Kronos-base 1h + 4h</strong>, on-chain, news &amp; technical analysis.<br><br>Estimated time: <strong>~15–20 minutes</strong>.<br>Results appear automatically when ready.</div>
+    <div class="prog-bg"><div class="prog-fill" id="progFill"></div></div>
     <div class="prog-label" id="computingLabel">Please wait…</div>
+    <div style="margin-top:12px;background:var(--card2);border-radius:10px;padding:10px">
+      <div style="font-size:22px;font-weight:800;color:var(--accent2)" id="timerDisplay">00:00</div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:2px">Elapsed / Est. remaining</div>
+      <div style="font-size:13px;color:var(--muted2);margin-top:4px" id="timerRemaining">Estimating…</div>
+    </div>
   </div>
 
   <div id="notStarted" class="hidden">
@@ -219,7 +224,38 @@ const COINS=['BTC','ETH','BNB','SOL','ADA','ZEC','TAO'];
 const BSYMS={BTC:'BTCUSDT',ETH:'ETHUSDT',BNB:'BNBUSDT',SOL:'SOLUSDT',ADA:'ADAUSDT',ZEC:'ZECUSDT',TAO:'TAOUSDT'};
 let currentCoin='BTC',pollTimer=null,statusData={};
 
-async function livePx(){
+let timerInterval = null;
+const ESTIMATED_SECS = 20 * 60; // 20 minutes estimated
+
+function startTimer(startedAt){
+  if(timerInterval) clearInterval(timerInterval);
+  timerInterval = setInterval(()=>{
+    const elapsed = Math.floor(Date.now()/1000 - startedAt);
+    const remaining = Math.max(0, ESTIMATED_SECS - elapsed);
+    const em = String(Math.floor(elapsed/60)).padStart(2,'0');
+    const es = String(elapsed%60).padStart(2,'0');
+    const rm = String(Math.floor(remaining/60)).padStart(2,'0');
+    const rs = String(remaining%60).padStart(2,'0');
+    const timerEl = document.getElementById('timerDisplay');
+    const remEl = document.getElementById('timerRemaining');
+    if(timerEl) timerEl.textContent = em+':'+es;
+    if(remEl){
+      if(remaining > 0){
+        remEl.textContent = '~'+rm+':'+rs+' remaining';
+      } else {
+        remEl.textContent = 'Almost done — finalizing…';
+      }
+    }
+    // Update progress bar based on time
+    const pct = Math.min(95, (elapsed/ESTIMATED_SECS)*100);
+    const fill = document.getElementById('progFill');
+    if(fill) fill.style.width = pct+'%';
+  }, 1000);
+}
+
+function stopTimer(){
+  if(timerInterval){ clearInterval(timerInterval); timerInterval = null; }
+}
   try{
     const r=await fetch('https://api.binance.com/api/v3/ticker/price?symbol='+BSYMS[currentCoin]);
     const d=await r.json();const p=parseFloat(d.price);
@@ -267,9 +303,14 @@ function showCoinState(){
   if(isRunning){
     document.getElementById('computingCard').classList.remove('hidden');
     document.getElementById('computingTitle').textContent='Computing '+currentCoin+'…';
+    // Start timer if we have start time from server
+    if(statusData.running_since && statusData.running_since[currentCoin]){
+      startTimer(statusData.running_since[currentCoin]);
+    }
     startPolling();
-  }else if(isCached){loadCache();}
+  }else if(isCached){stopTimer();loadCache();}
   else{
+    stopTimer();
     document.getElementById('notStarted').classList.remove('hidden');
     document.getElementById('notStartedTitle').textContent=currentCoin+' — No Prediction Yet';
   }
@@ -329,6 +370,7 @@ const fmt=v=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFracti
 
 function showResults(d){
   ['computingCard','notStarted'].forEach(id=>document.getElementById(id).classList.add('hidden'));
+  stopTimer();
   document.getElementById('results').classList.remove('hidden');
   d.is_running?document.getElementById('refreshBadge').classList.remove('hidden'):document.getElementById('refreshBadge').classList.add('hidden');
   document.getElementById('updatedTime').textContent='Last updated: '+new Date(d.updated_at).toLocaleString();

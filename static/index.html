@@ -362,10 +362,15 @@ function startPrediction() {
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (btn) { btn.textContent = 'Run Kronos Prediction'; btn.disabled = false; }
-      fetch(BASE + '/status')
-        .then(function(r2) { return r2.json(); })
-        .then(function(s) { statusData = s; updateCoinButtons(); showCoinState(); })
-        .catch(function(){});
+      // Show computing card immediately — coin is queued even if not yet running
+      ['computingCard','notStarted','results'].forEach(function(id) {
+        document.getElementById(id).classList.add('hidden');
+      });
+      document.getElementById('computingCard').classList.remove('hidden');
+      document.getElementById('computingTitle').textContent = currentCoin + ' — Queued';
+      document.getElementById('computingLabel').textContent = 'Waiting for current prediction to finish, then will start automatically…';
+      // Start polling to detect when it starts/finishes
+      startPolling();
     }).catch(function() {
       if (btn) { btn.textContent = '❌ Error — try again'; btn.disabled = false; }
     });

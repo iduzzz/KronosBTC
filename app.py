@@ -361,7 +361,7 @@ def find_safe_lookback(df, symbol):
     """
     Run a single fast prediction with pred_len=2 to find the maximum
     lookback the model can handle without a RoPE tensor size mismatch.
-    Validates BEFORE committing to the full N=50 Monte Carlo loop.
+    Validates BEFORE committing to the full N=100 Monte Carlo loop.
     """
     candidates = [len(df), 360, 340, 320, 300, 256]
     for lookback in candidates:
@@ -392,7 +392,7 @@ def find_safe_lookback(df, symbol):
     raise RuntimeError(f"{symbol}: no working lookback found in {candidates}")
 
 
-# ── Kronos Monte Carlo — N=50, T=0.7, with real-time progress tracking ────────
+# ── Kronos Monte Carlo — N=100, T=0.7, with real-time progress tracking ───────
 def kronos_predict(df, symbol="UNK", pred_len=24):
     # Step 1: Find safe lookback via fast dry-run BEFORE the MC loop
     safe_lookback = find_safe_lookback(df, symbol)
@@ -520,7 +520,7 @@ def run_prediction(symbol):
     st = threading.Thread(target=fetch_signals)
     st.start()
 
-    # Run Kronos (N=50, T=0.7) with real-time progress tracking
+    # Run Kronos (N=100, T=0.7) with real-time progress tracking
     pred = kronos_predict(df, symbol=symbol, pred_len=PRED_LEN)
 
     st.join()  # Wait for external signals

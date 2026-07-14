@@ -337,9 +337,13 @@ async function loadCache(){
   try{
     const r=await fetch(BASE+'/cache/'+currentCoin);
     if(!r.ok){showCoinState();return;}
-    const d=await r.json();if(d.error){showCoinState();return;}
+    const d=await r.json();
+    if(d.error){showCoinState();return;}
     showResults(d);
-  }catch(e){}
+  }catch(e){
+    console.error('loadCache error:',e);
+    document.getElementById('computingLabel').textContent='Display error: '+e.message;
+  }
 }
 
 async function startPrediction(){
@@ -363,6 +367,7 @@ async function startPrediction(){
 const fmt=v=>'$'+v.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:v<1?6:v<100?4:2});
 
 function showResults(d){
+  try{
   ['computingCard','notStarted'].forEach(id=>document.getElementById(id).classList.add('hidden'));
   stopTimer();
   document.getElementById('results').classList.remove('hidden');
@@ -469,6 +474,11 @@ function showResults(d){
   }
 
   drawChart(d);buildTable(d);
+  }catch(e){
+    console.error('showResults error:',e);
+    document.getElementById('computingCard').classList.remove('hidden');
+    document.getElementById('computingLabel').textContent='Display error: '+e.message+' — please refresh page';
+  }
 }
 
 function buildTable(d){

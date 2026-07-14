@@ -6,9 +6,16 @@ import requests
 from flask import Flask, jsonify, send_from_directory
 from flask_cors import CORS
 import xml.etree.ElementTree as ET
+import torch
 
-sys.path.insert(0, '/opt/kronosbtc')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from model import Kronos, KronosTokenizer, KronosPredictor
+
+# ── Performance optimization — use ALL CPU cores ───────────────────────────────
+NUM_CORES = os.cpu_count() or 4
+torch.set_num_threads(NUM_CORES)
+torch.set_num_interop_threads(max(1, NUM_CORES // 2))
+print(f"[Perf] Using {NUM_CORES} CPU cores for PyTorch", flush=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app = Flask(__name__, static_folder=os.path.join(BASE_DIR, 'static'))
@@ -19,24 +26,25 @@ TOKENIZER_NAME = "NeoQuasar/Kronos-Tokenizer-base"
 LOOKBACK_1H    = 384
 LOOKBACK_4H    = 384
 PRED_LEN       = 24
-MONTE_CARLO_N  = 30
+MONTE_CARLO_N  = 50   # Increased from 30 to 50 — i9 can handle it
 REFRESH_SECS   = 3600
-CACHE_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache.json")
+NUM_WORKERS    = 2    # 2 coins processed simultaneously
+CACHE_FILE     = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache.json")
 
 COINS = {
     "BTC": "BTCUSDT", "ETH": "ETHUSDT", "BNB": "BNBUSDT", "SOL": "SOLUSDT",
     "ADA": "ADAUSDT", "ZEC": "ZECUSDT", "TAO": "TAOUSDT",
 }
 
-predictor  = None
-cache      = {}
-cache_lock = threading.Lock()
+predictor   = None
+cache       = {}
+cache_lock  = threading.Lock()
 model_ready = False
 model_error = ""
-running      = {}   # symbol -> True/False
-running_since = {}  # symbol -> start timestamp
+running      = {}
+running_since = {}
 
-# Safe queue worker — prevents thread leaks
+# 2 parallel workers
 task_queue = queue.Queue()
 
 def worker():
@@ -53,7 +61,6 @@ def worker():
             traceback.print_exc()
         finally:
             running[symbol] = False
-        # Re-queue after REFRESH_SECS using non-blocking timer
         def requeue(s=symbol):
             print(f"[Kronos] Auto-refresh: re-queuing {s}", flush=True)
             if s not in list(task_queue.queue):
@@ -270,14 +277,15 @@ def kronos_predict(df, pred_len=24):
     y_timestamp = pd.Series(future_times).reset_index(drop=True)
 
     all_closes, all_highs, all_lows = [], [], []
-    for i in range(MONTE_CARLO_N):
-        p = predictor.predict(
-            df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
-            pred_len=pred_len, T=0.7, top_p=0.9, sample_count=1
-        )
-        all_closes.append(p["close"].values)
-        all_highs.append(p["high"].values)
-        all_lows.append(p["low"].values)
+    with torch.inference_mode():
+        for i in range(MONTE_CARLO_N):
+            p = predictor.predict(
+                df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
+                pred_len=pred_len, T=0.7, top_p=0.9, sample_count=1
+            )
+            all_closes.append(p["close"].values)
+            all_highs.append(p["high"].values)
+            all_lows.append(p["low"].values)
 
     closes = np.array(all_closes)
     return {
@@ -484,10 +492,16 @@ def load_model():
         print("[Kronos] Loading Kronos-base...", flush=True)
         model = Kronos.from_pretrained(MODEL_NAME)
         model.eval()
-        predictor   = KronosPredictor(model, tokenizer, max_context=512)
+        # Use torch.inference_mode for faster inference (no gradient tracking)
+        with torch.inference_mode():
+            predictor = KronosPredictor(model, tokenizer, max_context=512)
+        predictor._model = model
+        predictor._tokenizer = tokenizer
         model_ready = True
-        print("[Kronos] Model ready!", flush=True)
-        threading.Thread(target=worker, daemon=True).start()
+        print(f"[Kronos] Model ready! Workers={NUM_WORKERS} Cores={NUM_CORES} N={MONTE_CARLO_N}", flush=True)
+        # Start NUM_WORKERS parallel worker threads
+        for i in range(NUM_WORKERS):
+            threading.Thread(target=worker, daemon=True, name=f"Worker-{i+1}").start()
         task_queue.put("BTC")
     except Exception as e:
         model_error = str(e)

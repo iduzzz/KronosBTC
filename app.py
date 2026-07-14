@@ -69,23 +69,70 @@ def worker():
         print(f"[Kronos] {symbol} done. Next auto-refresh in {REFRESH_SECS//60}min.", flush=True)
 
 
-# ── Cache persistence ──────────────────────────────────────────────────────────
-def save_cache():
+# ── Cache persistence — SQLite (thread-safe, no race conditions) ───────────────
+import sqlite3
+
+DB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cache.db")
+db_lock = threading.Lock()
+
+def init_db():
+    with sqlite3.connect(DB_FILE) as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS predictions (
+                symbol TEXT PRIMARY KEY,
+                data TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                error TEXT
+            )
+        """)
+        conn.commit()
+    print(f"[Cache] SQLite initialized: {DB_FILE}", flush=True)
+
+def save_cache_db(symbol, result):
     try:
-        with open(CACHE_FILE, "w") as f:
-            json.dump(cache, f)
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO predictions (symbol, data, updated_at, error)
+                    VALUES (?, ?, ?, NULL)
+                """, (symbol, json.dumps(result), result["updated_at"]))
+                conn.commit()
+        with cache_lock:
+            cache[symbol] = result
+        print(f"[Cache] Saved {symbol} to SQLite.", flush=True)
     except Exception as e:
         print(f"[Cache] Save failed: {e}", flush=True)
+
+def save_error_db(symbol, error_msg):
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("""
+                    UPDATE predictions SET error=? WHERE symbol=?
+                """, (error_msg, symbol))
+                conn.commit()
+    except Exception as e:
+        print(f"[Cache] Error save failed: {e}", flush=True)
 
 def load_cache_from_disk():
     global cache
     try:
-        if os.path.exists(CACHE_FILE):
-            with open(CACHE_FILE, "r") as f:
-                cache = json.load(f)
-            print(f"[Cache] Loaded: {list(cache.keys())}", flush=True)
+        init_db()
+        with sqlite3.connect(DB_FILE) as conn:
+            rows = conn.execute("SELECT symbol, data FROM predictions").fetchall()
+        for symbol, data in rows:
+            try:
+                cache[symbol] = json.loads(data)
+            except Exception:
+                pass
+        if cache:
+            print(f"[Cache] Loaded from SQLite: {list(cache.keys())}", flush=True)
     except Exception as e:
         print(f"[Cache] Load failed: {e}", flush=True)
+
+# Keep save_cache as alias for compatibility
+def save_cache():
+    pass  # No-op — saving is now done per-symbol via save_cache_db
 
 
 # ── Technical indicators ───────────────────────────────────────────────────────
@@ -475,9 +522,8 @@ def run_prediction(symbol):
     # Convert all numpy types to native Python for JSON serialization
     result = json.loads(json.dumps(result, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
 
-    with cache_lock:
-        cache[symbol] = result
-    save_cache()
+    # Save to SQLite (thread-safe, no race conditions)
+    save_cache_db(symbol, result)
 
     print(f"[Kronos] {symbol} DONE. Upside={upside_prob:.1f}% Conf={confidence:.1f}% Context={signal_context['context']}", flush=True)
     return result
@@ -534,12 +580,38 @@ def get_cache(symbol):
         return jsonify({"error": f"Unknown symbol {symbol}"}), 400
     if symbol not in cache:
         return jsonify({
-            "error":      f"No prediction yet for {symbol}.",
+            "error":       f"No prediction yet for {symbol}.",
             "model_ready": model_ready,
-            "is_running": running.get(symbol, False)
+            "is_running":  running.get(symbol, False)
         }), 404
+
     result = dict(cache[symbol])
     result["is_running"] = running.get(symbol, False)
+
+    # Add staleness info (#11 fix)
+    try:
+        from datetime import datetime, timezone
+        updated = datetime.fromisoformat(result["updated_at"])
+        now = datetime.now(timezone.utc)
+        age_secs = int((now - updated).total_seconds())
+        age_mins = age_secs // 60
+        next_refresh = max(0, REFRESH_SECS - age_secs)
+        next_mins = next_refresh // 60
+        result["age_minutes"]        = age_mins
+        result["next_refresh_mins"]  = next_mins
+        result["is_stale"]           = age_secs > REFRESH_SECS + 300  # 5 min grace
+    except Exception:
+        pass
+
+    # Check for prediction errors in DB (#12 fix)
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            row = conn.execute("SELECT error FROM predictions WHERE symbol=?", (symbol,)).fetchone()
+            if row and row[0]:
+                result["last_error"] = row[0]
+    except Exception:
+        pass
+
     return jsonify(result)
 
 @app.route("/predict/<symbol>")

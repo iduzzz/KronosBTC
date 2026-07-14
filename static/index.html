@@ -12,7 +12,29 @@
 :root{--bg:#0a0e1a;--card:#111827;--card2:#1a2235;--border:#1e2d45;--accent:#3b82f6;--accent2:#60a5fa;--green:#10b981;--red:#ef4444;--orange:#f59e0b;--purple:#8b5cf6;--text:#f1f5f9;--muted:#64748b;--muted2:#94a3b8}
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
-.header{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:calc(48px + env(safe-area-inset-top)) 20px 16px;text-align:center;border-bottom:1px solid var(--border)}
+.header{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:calc(48px + env(safe-area-inset-top)) 20px 16px;text-align:center;border-bottom:1px solid var(--border);position:relative}
+.hamburger{position:absolute;top:calc(14px + env(safe-area-inset-top));right:16px;width:36px;height:36px;border:none;background:rgba(255,255,255,.1);border-radius:8px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;-webkit-tap-highlight-color:transparent}
+.hamburger span{display:block;width:18px;height:2px;background:var(--text);border-radius:2px}
+.drawer{position:fixed;top:0;right:-100%;width:85%;max-width:340px;height:100vh;background:var(--card);z-index:1000;transition:right 0.3s ease;overflow-y:auto;padding-bottom:env(safe-area-inset-bottom)}
+.drawer.open{right:0}
+.drawer-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:999;display:none}
+.drawer-overlay.open{display:block}
+.drawer-header{padding:calc(20px + env(safe-area-inset-top)) 20px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
+.drawer-title{font-size:18px;font-weight:700}
+.drawer-close{background:none;border:none;color:var(--muted2);font-size:24px;cursor:pointer;padding:4px}
+.drawer-section{padding:16px}
+.drawer-section-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px}
+.acc-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--card2);border:1px solid var(--border);border-radius:12px;margin-bottom:8px}
+.acc-symbol{font-size:15px;font-weight:700}
+.acc-stats{text-align:right}
+.acc-pct{font-size:18px;font-weight:800}
+.acc-count{font-size:11px;color:var(--muted2);margin-top:2px}
+.acc-bar-bg{height:4px;background:var(--border);border-radius:99px;margin-top:8px;overflow:hidden}
+.acc-bar-fill{height:100%;border-radius:99px}
+.acc-empty{text-align:center;padding:24px;color:var(--muted2);font-size:13px;line-height:1.7}
+.info-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px}
+.info-label{color:var(--muted2)}
+.info-val{font-weight:600;text-align:right}
 .header-logo{font-size:11px;color:var(--accent2);letter-spacing:3px;text-transform:uppercase;margin-bottom:4px}
 .header-title{font-size:24px;font-weight:700;background:linear-gradient(90deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
 .header-sub{font-size:11px;color:var(--muted2);margin-top:3px}
@@ -85,9 +107,62 @@ canvas{width:100%!important;height:100%!important}
 </head>
 <body>
 <div class="header">
+  <button class="hamburger" onclick="openDrawer()">
+    <span></span><span></span><span></span>
+  </button>
   <div class="header-logo">Foundation Model</div>
   <div class="header-title">Kronos Forecast</div>
-  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=100 · T=0.7 · Auto-refresh 1h</div>
+  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=50 · T=0.7 · Auto-refresh 1h</div>
+</div>
+
+<!-- Drawer overlay -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+
+<!-- Drawer menu -->
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <div class="drawer-title">📊 Kronos Menu</div>
+    <button class="drawer-close" onclick="closeDrawer()">✕</button>
+  </div>
+
+  <!-- Accuracy statistics -->
+  <div class="drawer-section">
+    <div class="drawer-section-title">Prediction Accuracy (24h Direction)</div>
+    <div id="accuracyList">
+      <div class="acc-empty">
+        🕐 No accuracy data yet.<br><br>
+        After 24 hours, the app automatically checks whether each prediction was correct and logs it here.<br><br>
+        Check back tomorrow.
+      </div>
+    </div>
+  </div>
+
+  <!-- App info -->
+  <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
+    <div class="drawer-section-title">App Info</div>
+    <div class="info-row"><span class="info-label">Model</span><span class="info-val">Kronos-base 102M</span></div>
+    <div class="info-row"><span class="info-label">Device</span><span class="info-val" id="infoDevice">—</span></div>
+    <div class="info-row"><span class="info-label">Monte Carlo N</span><span class="info-val" id="infoN">—</span></div>
+    <div class="info-row"><span class="info-label">Lookback</span><span class="info-val">384h (16 days)</span></div>
+    <div class="info-row"><span class="info-label">Refresh</span><span class="info-val">Every 1 hour</span></div>
+    <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">BTC ETH BNB SOL ADA ZEC TAO</span></div>
+  </div>
+
+  <!-- How to read -->
+  <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
+    <div class="drawer-section-title">How to Read Results</div>
+    <div style="font-size:12px;color:var(--muted2);line-height:1.8">
+      <div>🎯 <strong style="color:var(--text)">Upside Prob</strong> — Kronos primary signal. % of Monte Carlo paths predicting price goes UP in 24h.</div>
+      <br>
+      <div>📊 <strong style="color:var(--text)">Confidence</strong> — How tight the P10/P90 band is. High = paths agree. Low = high uncertainty.</div>
+      <br>
+      <div>✓ <strong style="color:var(--green)">Confirmations</strong> — Auxiliary signals agreeing with Kronos direction.</div>
+      <br>
+      <div>⚠ <strong style="color:var(--orange)">Warnings</strong> — Signals contradicting or adding caution to Kronos.</div>
+      <br>
+      <div>📈 <strong style="color:var(--text)">P10/P90</strong> — 80% of Monte Carlo paths fell between these price levels.</div>
+    </div>
+  </div>
 </div>
 <div class="coin-bar">
   <span class="coin-btn active" onclick="selectCoin('BTC')" id="btn-BTC">BTC</span>
@@ -617,6 +692,79 @@ function drawChart(d) {
 livePx();
 setInterval(livePx, 10000);
 checkStatus();
+
+// ── Drawer (hamburger menu) ────────────────────────────────────────────────
+function openDrawer() {
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('drawerOverlay').classList.add('open');
+  loadAccuracy();
+}
+
+function closeDrawer() {
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('drawerOverlay').classList.remove('open');
+}
+
+function loadAccuracy() {
+  fetch(BASE + '/accuracy')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var el = document.getElementById('accuracyList');
+      var keys = Object.keys(data);
+      if (keys.length === 0) {
+        el.innerHTML = '<div class="acc-empty">🕐 No accuracy data yet.<br><br>After 24 hours, the app automatically checks whether each prediction was correct and logs it here.<br><br>Check back tomorrow.</div>';
+        return;
+      }
+      // Sort by total predictions descending
+      keys.sort(function(a,b) { return data[b].total - data[a].total; });
+      var html = '';
+      keys.forEach(function(sym) {
+        var d = data[sym];
+        var pct = d.pct;
+        var color = pct >= 60 ? 'var(--green)' : pct >= 45 ? 'var(--orange)' : 'var(--red)';
+        html += '<div class="acc-row">' +
+          '<div>' +
+            '<div class="acc-symbol">' + sym + '/USDT</div>' +
+            '<div style="font-size:11px;color:var(--muted2);margin-top:2px">' + d.correct + ' correct of ' + d.total + ' tracked</div>' +
+            '<div class="acc-bar-bg"><div class="acc-bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
+          '</div>' +
+          '<div class="acc-stats">' +
+            '<div class="acc-pct" style="color:' + color + '">' + pct + '%</div>' +
+            '<div class="acc-count">Direction<br>accuracy</div>' +
+          '</div>' +
+        '</div>';
+      });
+
+      // Overall stats
+      var totalAll = keys.reduce(function(s,k){return s+data[k].total;}, 0);
+      var correctAll = keys.reduce(function(s,k){return s+data[k].correct;}, 0);
+      var overallPct = totalAll > 0 ? (correctAll/totalAll*100).toFixed(1) : '—';
+      var overallColor = parseFloat(overallPct) >= 55 ? 'var(--green)' : parseFloat(overallPct) >= 45 ? 'var(--orange)' : 'var(--red)';
+
+      html = '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;text-align:center">' +
+        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Overall Directional Accuracy</div>' +
+        '<div style="font-size:36px;font-weight:800;color:' + overallColor + '">' + overallPct + '%</div>' +
+        '<div style="font-size:12px;color:var(--muted2);margin-top:4px">' + correctAll + ' correct out of ' + totalAll + ' predictions</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% · Good model ≥ 55%</div>' +
+      '</div>' + html;
+
+      el.innerHTML = html;
+
+      // Update info section
+      if (statusData.device) {
+        var devEl = document.getElementById('infoDevice');
+        if (devEl) devEl.textContent = statusData.device === 'directml' ? 'Intel Arc (CPU-bound)' :
+                                        statusData.device === 'cuda' ? 'NVIDIA GPU' : 'CPU';
+      }
+      if (statusData.monte_carlo_n) {
+        var nEl = document.getElementById('infoN');
+        if (nEl) nEl.textContent = statusData.monte_carlo_n;
+      }
+    }).catch(function(e) {
+      document.getElementById('accuracyList').innerHTML =
+        '<div class="acc-empty">⚠️ Could not load accuracy data.</div>';
+    });
+}
 </script>
 </body>
 </html>

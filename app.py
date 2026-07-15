@@ -67,6 +67,10 @@ progress     = {}   # symbol -> {"current": N, "total": N, "secs_per_run": float
 task_queue   = queue.Queue()
 db_lock      = threading.Lock()
 
+# [FIX] Bulletproof Task Queue: Track queued coins to prevent race conditions
+queued_coins = set()
+queue_lock   = threading.Lock()
+
 
 # ── SQLite ─────────────────────────────────────────────────────────────────────
 def init_db():
@@ -224,6 +228,11 @@ def worker():
         symbol = task_queue.get()
         if symbol is None:
             break
+            
+        # [FIX] Remove from queued set when actually starting processing
+        with queue_lock:
+            queued_coins.discard(symbol)
+            
         running[symbol] = True
         running_since[symbol] = time.time()
         try:
@@ -283,8 +292,9 @@ def fetch_fear_greed():
         d = r.json()
         return {"value": int(d["data"][0]["value"]),
                 "label": d["data"][0]["value_classification"]}
-    except:
-        return {"value": 50, "label": "Neutral"}
+    except Exception:  # [FIX] Replaced bare except
+        # [FIX] Return None for value so interpretation logic knows it's missing
+        return {"value": None, "label": "N/A"}
 
 def fetch_funding_rate(symbol):
     try:
@@ -300,7 +310,8 @@ def fetch_funding_rate(symbol):
             return {"rate": round(rate, 4), "avg": round(avg, 4), "label": label}
     except Exception as e:
         print(f"[Funding] {symbol} failed: {e}", flush=True)
-    return {"rate": 0.0, "avg": 0.0, "label": "N/A"}
+    # [FIX] Return None for rate and avg so logic doesn't misinterpret 0.0 as "Neutral"
+    return {"rate": None, "avg": None, "label": "N/A"}
 
 def fetch_etf_flows():
     try:
@@ -348,7 +359,7 @@ def fetch_btc_dominance():
         r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
         if r.ok:
             return round(r.json()["data"]["market_cap_percentage"]["btc"], 2)
-    except:
+    except Exception:  # [FIX] Replaced bare except
         pass
     return None
 
@@ -483,8 +494,10 @@ def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
     rsi     = ind["rsi"]
     macd_h  = ind["macd_hist"]
     bb      = ind["bb_pct"]
-    fg      = fear_greed["value"]
-    fund    = funding["rate"]
+    
+    # [FIX] Use .get() to safely handle None values for missing API data
+    fg      = fear_greed.get("value")
+    fund    = funding.get("rate")
     bullish = upside_prob >= 50
 
     confirmations, warnings = [], []
@@ -500,11 +513,15 @@ def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
     if bb < 0.2:   confirmations.append("Price near lower BB - oversold zone")
     elif bb > 0.8: warnings.append("Price near upper BB - overbought zone")
 
-    if fg <= 20:   confirmations.append(f"Extreme Fear ({fg}) - historically strong buy zone")
-    elif fg >= 80: warnings.append(f"Extreme Greed ({fg}) - historically risky zone")
+    # [FIX] Only evaluate Fear & Greed if data was successfully fetched
+    if fg is not None:
+        if fg <= 20:   confirmations.append(f"Extreme Fear ({fg}) - historically strong buy zone")
+        elif fg >= 80: warnings.append(f"Extreme Greed ({fg}) - historically risky zone")
 
-    if fund > 0.05:   warnings.append(f"High funding ({fund:.3f}%) - longs overcrowded")
-    elif fund < -0.01: confirmations.append(f"Negative funding ({fund:.3f}%) - squeeze risk")
+    # [FIX] Only evaluate Funding Rates if data was successfully fetched
+    if fund is not None:
+        if fund > 0.05:   warnings.append(f"High funding ({fund:.3f}%) - longs overcrowded")
+        elif fund < -0.01: confirmations.append(f"Negative funding ({fund:.3f}%) - squeeze risk")
 
     if symbol == "BTC" and etf_flows.get("total") is not None:
         f = etf_flows["total"]
@@ -541,7 +558,7 @@ def run_prediction(symbol):
     sig = {}
     def fetch_signals():
         sig["indicators"]    = compute_indicators(df)
-        sig["fear_greed"]    = fetch_fear_greed() if symbol == "BTC" else {"value": 50, "label": "N/A"}
+        sig["fear_greed"]    = fetch_fear_greed() if symbol == "BTC" else {"value": None, "label": "N/A"}
         sig["onchain"]       = fetch_onchain() if symbol == "BTC" else {}
         sig["funding"]       = fetch_funding_rate(symbol)
         sig["etf_flows"]     = fetch_etf_flows() if symbol == "BTC" else {"total": None, "label": "N/A"}
@@ -657,11 +674,13 @@ def load_model():
         # No auto-queuing - user manually selects which coin to predict
         print(f"[Kronos] Ready! Waiting for manual prediction requests.", flush=True)
 
-        # Fix 2: Single background timer for accuracy checks
+        # [FIX] Run accuracy check immediately on startup, THEN loop hourly
         def accuracy_loop():
+            check_accuracy()  # Check pending predictions right now
             while True:
                 time.sleep(3600)
                 check_accuracy()
+                
         threading.Thread(target=accuracy_loop, daemon=True, name="AccuracyChecker").start()
 
     except Exception as e:
@@ -679,6 +698,9 @@ def index():
 
 @app.route("/status")
 def status():
+    # [FIX] Make a safe copy of progress so worker mutation doesn't crash JSON serialization
+    safe_progress = dict(progress)
+    
     return jsonify({
         "model_ready":   model_ready,
         "model_error":   model_error,
@@ -689,7 +711,7 @@ def status():
         "cached":        list(cache.keys()),
         "running":       {k: v for k, v in running.items() if v},
         "running_since": {k: v for k, v in running_since.items() if running.get(k)},
-        "progress":      progress,
+        "progress":      safe_progress,
         "accuracy":      get_accuracy_stats().get("by_coin", {}),
     })
 
@@ -723,9 +745,15 @@ def predict(symbol):
         return jsonify({"error": f"Unknown symbol {symbol}"}), 400
     if not model_ready:
         return jsonify({"error": "Model not loaded yet."}), 503
-    if running.get(symbol, False) or symbol in list(task_queue.queue):
-        return jsonify({"status": "already_running_or_queued"})
-    task_queue.put(symbol)
+        
+    # [FIX] Bulletproof queue check using a set and lock
+    with queue_lock:
+        if running.get(symbol, False) or symbol in queued_coins:
+            return jsonify({"status": "already_running_or_queued"})
+        
+        queued_coins.add(symbol)
+        task_queue.put(symbol)
+        
     return jsonify({"status": "queued"})
 
 @app.route("/accuracy")

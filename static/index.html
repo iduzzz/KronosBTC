@@ -65,7 +65,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .timer-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:2px}
 .timer-rem{font-size:13px;color:var(--muted2);margin-top:4px}
 .btn-predict{width:100%;padding:14px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:14px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity 0.2s}
-.btn-predict:active{opacity:.7}
+.btn-predict:active{opacity:.8}
 .metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .metric{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
 .metric-value{font-size:26px;font-weight:800;line-height:1;margin-bottom:4px}
@@ -112,7 +112,7 @@ canvas{width:100%!important;height:100%!important}
   </button>
   <div class="header-logo">Foundation Model</div>
   <div class="header-title">Kronos Forecast</div>
-  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=100 · T=0.7 · Auto-refresh 1h</div>
+  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=50 · T=0.7 · Manual refresh</div>
 </div>
 
 <!-- Drawer overlay -->
@@ -284,7 +284,7 @@ canvas{width:100%!important;height:100%!important}
     <!-- Chart -->
     <div class="card">
       <div class="card-title">Forecast Chart (24h)</div>
-      <div class="chart-wrap"><canvas id="chart"></canvas></canvas></div>
+      <div class="chart-wrap"><canvas id="chart"></canvas></div>
     </div>
 
     <!-- Table -->
@@ -323,18 +323,18 @@ function startTimer() {
     var tr = document.getElementById('timerRemaining');
     var pf = document.getElementById('progFill');
     var elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
-    var em = String(Math.floor(elapsed/60)).padStart(2, '0');
-    var es = String(elapsed%60).padStart(2, '0');
+    var em = String(Math.floor(elapsed/60)).padStart(2,'0');
+    var es = String(elapsed%60).padStart(2,'0');
     if (te) te.textContent = em + ':' + es + ' elapsed';
     if (prog && prog.total > 0) {
       var remSecs = Math.max(0, prog.remaining_secs);
-      var rm = String(Math.floor(remSecs/60)).padStart(2, '0');
-      var rs = String(Math.floor(remSecs%60)).padStart(2, '0');
+      var rm = String(Math.floor(remSecs/60)).padStart(2,'0');
+      var rs = String(Math.floor(remSecs%60)).padStart(2,'0');
       if (tr) tr.textContent = 'MC ' + prog.current + '/' + prog.total +
-        ' · ' + prog.secs_per_run.toFixed(1) + 's/run · ~' + rm + ':' + rs + ' remaining';
+        ' | ' + prog.secs_per_run.toFixed(1) + 's/run | ~' + rm + ':' + rs + ' remaining';
       if (pf) pf.style.width = prog.pct + '%';
     } else {
-      if (tr) tr.textContent = 'Fetching data & preparing…';
+      if (tr) tr.textContent = 'Fetching data & preparing...';
       if (pf) pf.style.width = '3%';
     }
   }, 1000);
@@ -368,15 +368,15 @@ function checkStatus() {
       var el = document.getElementById('statusRow');
       if (d.model_ready) {
         var dev = d.device === 'directml' ? '⚡ Intel Arc GPU' : d.device === 'cuda' ? '⚡ NVIDIA GPU' : '💻 CPU';
-        el.innerHTML = '<span>✅</span><span>Kronos-base ready · ' + dev + ' · N=' + (d.monte_carlo_n||100) + '</span>';
+        el.innerHTML = '<span>✅</span><span>Kronos-base ready . ' + dev + ' . N=' + (d.monte_carlo_n||100) + '</span>';
         var sub = document.getElementById('headerSub');
-        if (sub) sub.textContent = 'Kronos-base · 102M · N=' + (d.monte_carlo_n||100) + ' · ' + dev + ' · Auto-refresh 1h';
+        if (sub) sub.textContent = 'Kronos-base . 102M . N=' + (d.monte_carlo_n||100) + ' . ' + dev + ' . Manual refresh';
         updateCoinButtons();
         showCoinState();
       } else if (d.model_error) {
         el.innerHTML = '<span>❌</span><span>' + d.model_error + '</span>';
       } else {
-        el.innerHTML = '<span>⏳</span><span>Loading Kronos-base…</span>';
+        el.innerHTML = '<span>⏳</span><span>Loading Kronos-base...</span>';
         setTimeout(checkStatus, 8000);
       }
     }).catch(function() { setTimeout(checkStatus, 10000); });
@@ -409,7 +409,7 @@ function showCoinState() {
   var isCached  = statusData.cached && statusData.cached.indexOf(currentCoin) >= 0;
   if (isRunning) {
     document.getElementById('computingCard').classList.remove('hidden');
-    document.getElementById('computingTitle').textContent = 'Computing ' + currentCoin + '…';
+    document.getElementById('computingTitle').textContent = 'Computing ' + currentCoin + '...';
     startTimer();
     startPolling();
   } else if (isCached) {
@@ -418,7 +418,7 @@ function showCoinState() {
   } else {
     stopTimer();
     document.getElementById('notStarted').classList.remove('hidden');
-    document.getElementById('notStartedTitle').textContent = currentCoin + ' — No Prediction Yet';
+    document.getElementById('notStartedTitle').textContent = currentCoin + ' - No Prediction Yet';
   }
 }
 
@@ -438,7 +438,7 @@ function startPolling() {
           }
         }
       }).catch(function(){});
-  }, 5000);
+  }, 5000); // Poll every 5s during computation for real-time progress
 }
 
 function loadCache() {
@@ -452,7 +452,7 @@ function loadCache() {
 
 function startPrediction() {
   var btn = document.getElementById('btnStart');
-  if (btn) { btn.textContent = '⏳ Queuing…'; btn.disabled = true; }
+  if (btn) { btn.textContent = '⏳ Queuing...'; btn.disabled = true; }
   fetch(BASE + '/predict/' + currentCoin)
     .then(function(r) { return r.json(); })
     .then(function(d) {
@@ -461,14 +461,14 @@ function startPrediction() {
         document.getElementById(id).classList.add('hidden');
       });
       document.getElementById('computingCard').classList.remove('hidden');
-      document.getElementById('computingTitle').textContent = currentCoin + ' — Queued';
+      document.getElementById('computingTitle').textContent = currentCoin + ' - Queued';
       document.getElementById('computingLabel').textContent =
         d.status === 'already_running_or_queued'
-          ? 'Already computing — please wait…'
-          : 'Queued — will start after current prediction finishes…';
+          ? 'Already computing - please wait...'
+          : 'Queued - will start after current prediction finishes...';
       startPolling();
     }).catch(function() {
-      if (btn) { btn.textContent = '❌ Error — try again'; btn.disabled = false; }
+      if (btn) { btn.textContent = '❌ Error - try again'; btn.disabled = false; }
     });
 }
 
@@ -487,9 +487,9 @@ function showResults(d) {
   // Staleness
   var ageText = '';
   if (d.age_minutes !== undefined) {
-    ageText = d.age_minutes < 1 ? ' · Just updated' :
-              d.age_minutes === 1 ? ' · 1 min ago' : ' · ' + d.age_minutes + ' min ago';
-    if (d.next_refresh_mins > 0) ageText += ' · refresh in ' + d.next_refresh_mins + 'min';
+    ageText = d.age_minutes < 1 ? ' . Just updated' :
+              d.age_minutes === 1 ? ' . 1 min ago' : ' . ' + d.age_minutes + ' min ago';
+    if (d.next_refresh_mins > 0) ageText += ' . refresh in ' + d.next_refresh_mins + 'min';
   }
   var staleHtml = d.is_stale ? ' <span class="stale-warn">⚠️ Stale</span>' : '';
   document.getElementById('updatedTime').innerHTML =
@@ -502,7 +502,7 @@ function showResults(d) {
     gb.style.display = 'inline-flex';
     gb.textContent = d.device === 'directml' ? '⚡ Intel Arc GPU' : '⚡ NVIDIA GPU';
   }
-  if (db) db.textContent = '🧠 Kronos-base · 102.3M · N=' + (d.monte_carlo_n||100) + ' · T=0.7 · P10/P90';
+  if (db) db.textContent = '🧠 Kronos-base . 102.3M . N=' + (d.monte_carlo_n||100) + ' . T=0.7 . P10/P90';
 
   // Upside
   var up = d.upside_prob;
@@ -511,7 +511,7 @@ function showResults(d) {
   uEl.className = 'metric-value ' + (up >= 60 ? 'up' : up >= 40 ? 'warn' : 'down');
   var bar = document.getElementById('upsideBar');
   bar.style.width = up + '%';
-  bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)');
+  bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)';
 
   // Confidence
   var conf = d.confidence || 50;
@@ -547,7 +547,7 @@ function showResults(d) {
       wDiv.innerHTML += '<div class="context-item"><span style="color:var(--orange)">⚠</span><span>' + w + '</span></div>';
     });
     if (!sc.confirmations.length && !sc.warnings.length) {
-      cDiv.innerHTML = '<div class="context-item"><span style="color:var(--muted2)">—</span><span style="color:var(--muted2)">No strong auxiliary signals</span></div>';
+      cDiv.innerHTML = '<div class="context-item"><span style="color:var(--muted2)">-</span><span style="color:var(--muted2)">No strong auxiliary signals</span></div>';
     }
   }
 
@@ -596,7 +596,7 @@ function showResults(d) {
   // Crypto-native signals
   if (d.funding) {
     var fundEl = document.getElementById('fundingVal');
-    fundEl.textContent = d.funding.rate.toFixed(3) + '% · ' + d.funding.label;
+    fundEl.textContent = d.funding.rate.toFixed(3) + '% . ' + d.funding.label;
     fundEl.className = 'signal-val ' +
       (d.funding.label === 'Overcrowded Longs' ? 'warn' :
        d.funding.label === 'Overcrowded Shorts' ? 'up' : '');
@@ -604,14 +604,14 @@ function showResults(d) {
 
   if (d.etf_flows && d.etf_flows.total !== null) {
     var etfEl = document.getElementById('etfVal');
-    etfEl.textContent = (d.etf_flows.total > 0 ? '+' : '') + d.etf_flows.total.toFixed(0) + 'M · ' + d.etf_flows.label;
+    etfEl.textContent = (d.etf_flows.total > 0 ? '+' : '') + d.etf_flows.total.toFixed(0) + 'M . ' + d.etf_flows.label;
     etfEl.className = 'signal-val ' + (d.etf_flows.total > 0 ? 'up' : 'down');
     document.getElementById('etfItem').classList.remove('hidden');
   }
 
   if (d.onchain && d.onchain.mempool_size !== undefined) {
     document.getElementById('memVal').textContent =
-      (d.onchain.mempool_size || 0).toLocaleString() + ' · ' + (d.onchain.mempool_label || '');
+      (d.onchain.mempool_size || 0).toLocaleString() + ' . ' + (d.onchain.mempool_label || '');
   }
 
   if (d.btc_dominance) {
@@ -630,16 +630,16 @@ function buildTable(d) {
   hours.forEach(function(i) {
     if (i >= fc.mean_close.length) return;
     var m = fc.mean_close[i], hi = fc.upper[i], lo = fc.lower[i];
-    var chg = ((m - d.last_price) / d.last_price * 100;
+    var chg = ((m - d.last_price) / d.last_price * 100);
     var tr = document.createElement('tr');
     tr.innerHTML =
       '<td><span class="hbadge">+' + (i+1) + 'h</span></td>' +
       '<td style="font-weight:600;color:' + (chg>=0?'var(--green)':'var(--red)') + '">' +
         fmt(m) + '<span style="font-size:10px;color:var(--muted2)">&nbsp;' +
-        (chg>=0?'+':'-') + chg.toFixed(1) + '%</span></td>' +
+        (chg>=0?'+':'') + chg.toFixed(1) + '%</span></td>' +
       '<td style="font-size:11px;text-align:right">' +
         '<span style="color:var(--green)">▲' + fmt(hi) + '</span><br>' +
-        '<span style="color:var(--red)">▼' + fmt(lo) + '</span></td></tr>';
+        '<span style="color:var(--red)">▼' + fmt(lo) + '</span></td>';
     tb.appendChild(tr);
   });
 }
@@ -693,7 +693,7 @@ livePx();
 setInterval(livePx, 10000);
 checkStatus();
 
-// ── Drawer (hamburger menu) ────────────────────────────────────────────────────────
+// ── Drawer (hamburger menu) ────────────────────────────────────────────────
 function openDrawer() {
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawerOverlay').classList.add('open');
@@ -702,7 +702,7 @@ function openDrawer() {
 
 function closeDrawer() {
   document.getElementById('drawer').classList.remove('open');
-  document.getElementById('drawer-overlay').classList.remove('open');
+  document.getElementById('drawerOverlay').classList.remove('open');
 }
 
 function loadAccuracy() {
@@ -722,21 +722,20 @@ function loadAccuracy() {
       // Overall stats
       var totalAll = keys.reduce(function(s,k){return s+byCoin[k].total;}, 0);
       var correctAll = keys.reduce(function(s,k){return s+byCoin[k].correct;}, 0);
-      var overallPct = totalAll > 0 ? (correctAll/totalAll*100).toFixed(1) : '—';
+      var overallPct = totalAll > 0 ? (correctAll/totalAll*100).toFixed(1) : '-';
       var overallColor = parseFloat(overallPct) >= 55 ? 'var(--green)' : parseFloat(overallPct) >= 45 ? 'var(--orange)' : 'var(--red)';
 
       var html = '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;text-align:center">' +
         '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Overall Directional Accuracy</div>' +
         '<div style="font-size:36px;font-weight:800;color:' + overallColor + '">' + overallPct + '%</div>' +
         '<div style="font-size:12px;color:var(--muted2);margin-top:4px">' + correctAll + ' correct out of ' + totalAll + ' predictions</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% · Good model ≥ 55%</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% . Good model ≥ 55%</div>' +
       '</div>';
 
-      // Confidence buckets
+      // Confidence buckets - the key insight
       var confKeys = ['high', 'medium', 'low'];
       var confLabels = {high: '🟢 High Confidence (≥80%)', medium: '🟡 Medium (60–80%)', low: '🔴 Low (<60%)'};
       var hasConf = confKeys.some(function(k){ return byConf[k]; });
-      
       if (hasConf) {
         html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">';
         html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Accuracy by Confidence Level</div>';
@@ -749,9 +748,9 @@ function loadAccuracy() {
             '<div><div style="font-size:12px;font-weight:600">' + confLabels[k] + '</div>' +
             '<div style="font-size:11px;color:var(--muted2)">' + b.correct + '/' + b.total + ' correct</div></div>' +
             '<div style="font-size:18px;font-weight:800;color:' + bColor + '">' + b.pct + '%</div>' +
-          '</div>' +
           '</div>';
         });
+        html += '</div>';
       }
 
       // Per-coin stats

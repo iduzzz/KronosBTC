@@ -659,12 +659,37 @@ def load_model():
 
         for i in range(NUM_WORKERS):
             threading.Thread(target=worker, daemon=True, name=f"Worker-{i+1}").start()
+
+        # Always queue BTC first
         task_queue.put("BTC")
 
-        # Fix 2: Single background timer for accuracy checks (not per-prediction thread)
+        # Queue refresh for all other cached coins based on how stale they are
+        for symbol, cached_result in cache.items():
+            if symbol == "BTC":
+                continue  # already queued
+            try:
+                updated = datetime.fromisoformat(cached_result["updated_at"])
+                age_secs = int((datetime.now(timezone.utc) - updated).total_seconds())
+                if age_secs >= REFRESH_SECS:
+                    # Already stale — queue immediately
+                    print(f"[Kronos] {symbol} is stale ({age_secs//60}min old) — queuing refresh", flush=True)
+                    task_queue.put(symbol)
+                else:
+                    # Not stale yet — schedule refresh for when it becomes stale
+                    delay = REFRESH_SECS - age_secs
+                    print(f"[Kronos] {symbol} fresh — refresh in {delay//60}min", flush=True)
+                    def schedule(s=symbol, d=delay):
+                        time.sleep(d)
+                        if s not in list(task_queue.queue) and not running.get(s, False):
+                            task_queue.put(s)
+                    threading.Thread(target=schedule, daemon=True, name=f"Scheduler-{symbol}").start()
+            except Exception as e:
+                print(f"[Kronos] Could not schedule {symbol}: {e}", flush=True)
+
+        # Fix 2: Single background timer for accuracy checks
         def accuracy_loop():
             while True:
-                time.sleep(3600)  # check every hour
+                time.sleep(3600)
                 check_accuracy()
         threading.Thread(target=accuracy_loop, daemon=True, name="AccuracyChecker").start()
 

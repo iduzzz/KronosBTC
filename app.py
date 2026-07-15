@@ -399,7 +399,7 @@ def find_safe_lookback(df, symbol):
     lookback the model can handle without a RoPE tensor size mismatch.
     Validates BEFORE committing to the full N=100 Monte Carlo loop.
     """
-    candidates = [len(df), 360, 340, 320, 300, 256]
+    candidates = [370, 360, 350, 340, 330, 320, 300, 280, 256]
     for lookback in candidates:
         if lookback > len(df):
             continue
@@ -409,14 +409,14 @@ def find_safe_lookback(df, symbol):
         last_time   = test_df["timestamps"].iloc[-1]
         future_times = pd.date_range(
             start=last_time + pd.Timedelta(hours=1),
-            periods=2, freq="1h", tz="UTC"
+            periods=24, freq="1h", tz="UTC"
         )
         y_timestamp = pd.Series(future_times).reset_index(drop=True)
         try:
             with torch.inference_mode():
                 predictor.predict(
                     df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
-                    pred_len=2, T=0.7, top_p=0.9, sample_count=1
+                    pred_len=24, T=0.7, top_p=0.9, sample_count=1
                 )
             print(f"[Kronos] {symbol} safe lookback={lookback} (dry-run passed)", flush=True)
             return lookback
@@ -450,10 +450,16 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
     with torch.inference_mode():
         for i in range(MONTE_CARLO_N):
             t_start = time.time()
-            p = predictor.predict(
-                df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
-                pred_len=pred_len, T=0.7, top_p=0.9, sample_count=1
-            )
+            try:
+                p = predictor.predict(
+                    df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
+                    pred_len=pred_len, T=0.7, top_p=0.9, sample_count=1
+                )
+            except RuntimeError as e:
+                if "size of tensor" in str(e) or "must match" in str(e):
+                    print(f"[Kronos] {symbol} unexpected tensor error at MC run {i+1} with lookback={safe_lookback}: {e}", flush=True)
+                    raise
+                raise
             elapsed = time.time() - t_start
             run_times.append(elapsed)
             all_closes.append(p["close"].values)

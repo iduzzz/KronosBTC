@@ -48,7 +48,7 @@ PRED_LEN       = 24
 # N dynamically set after device detection in load_model
 MONTE_CARLO_N  = 100   # default, overridden based on device
 REFRESH_SECS   = 3600
-NUM_WORKERS    = 2
+NUM_WORKERS    = 1     # Kronos model is NOT thread-safe — must run one coin at a time
 DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
 
 COINS = {
@@ -218,7 +218,7 @@ def get_accuracy_stats():
         return {"by_coin": {}, "by_confidence": {}}
 
 
-# ── Worker (fixed requeue fragility) ──────────────────────────────────────────
+# ── Worker — processes one coin at a time, no auto-requeue ────────────────────
 def worker():
     while True:
         symbol = task_queue.get()
@@ -233,19 +233,7 @@ def worker():
             traceback.print_exc()
         finally:
             running[symbol] = False
-
-        # Fixed requeue — wrapped in try/except so failures don't silently kill the coin
-        def safe_requeue(s=symbol):
-            try:
-                if s not in list(task_queue.queue) and not running.get(s, False):
-                    task_queue.put(s)
-                    print(f"[Queue] {s} re-queued for auto-refresh.", flush=True)
-            except Exception as eq:
-                print(f"[Queue] Re-queue failed for {s}: {eq}. Retrying in 60s...", flush=True)
-                threading.Timer(60, safe_requeue).start()
-
-        threading.Timer(REFRESH_SECS, safe_requeue).start()
-        # Accuracy check runs on a single background timer, not per-prediction thread
+        print(f"[Kronos] {symbol} complete. Waiting for next manual request.", flush=True)
 
 
 # ── Technical Indicators (RSI with Wilder's smoothing) ────────────────────────
@@ -666,31 +654,8 @@ def load_model():
         for i in range(NUM_WORKERS):
             threading.Thread(target=worker, daemon=True, name=f"Worker-{i+1}").start()
 
-        # Always queue BTC first
-        task_queue.put("BTC")
-
-        # Queue refresh for all other cached coins based on how stale they are
-        for symbol, cached_result in cache.items():
-            if symbol == "BTC":
-                continue  # already queued
-            try:
-                updated = datetime.fromisoformat(cached_result["updated_at"])
-                age_secs = int((datetime.now(timezone.utc) - updated).total_seconds())
-                if age_secs >= REFRESH_SECS:
-                    # Already stale — queue immediately
-                    print(f"[Kronos] {symbol} is stale ({age_secs//60}min old) — queuing refresh", flush=True)
-                    task_queue.put(symbol)
-                else:
-                    # Not stale yet — schedule refresh for when it becomes stale
-                    delay = REFRESH_SECS - age_secs
-                    print(f"[Kronos] {symbol} fresh — refresh in {delay//60}min", flush=True)
-                    def schedule(s=symbol, d=delay):
-                        time.sleep(d)
-                        if s not in list(task_queue.queue) and not running.get(s, False):
-                            task_queue.put(s)
-                    threading.Thread(target=schedule, daemon=True, name=f"Scheduler-{symbol}").start()
-            except Exception as e:
-                print(f"[Kronos] Could not schedule {symbol}: {e}", flush=True)
+        # No auto-queuing — user manually selects which coin to predict
+        print(f"[Kronos] Ready! Waiting for manual prediction requests.", flush=True)
 
         # Fix 2: Single background timer for accuracy checks
         def accuracy_loop():

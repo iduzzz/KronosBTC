@@ -112,7 +112,7 @@ canvas{width:100%!important;height:100%!important}
   </button>
   <div class="header-logo">Foundation Model</div>
   <div class="header-title">Kronos Forecast</div>
-  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=50 · T=0.7 · Auto-refresh 1h</div>
+  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=50 · T=0.7 · Manual refresh</div>
 </div>
 
 <!-- Drawer overlay -->
@@ -370,7 +370,7 @@ function checkStatus() {
         var dev = d.device === 'directml' ? '⚡ Intel Arc GPU' : d.device === 'cuda' ? '⚡ NVIDIA GPU' : '💻 CPU';
         el.innerHTML = '<span>✅</span><span>Kronos-base ready · ' + dev + ' · N=' + (d.monte_carlo_n||100) + '</span>';
         var sub = document.getElementById('headerSub');
-        if (sub) sub.textContent = 'Kronos-base · 102M · N=' + (d.monte_carlo_n||100) + ' · ' + dev + ' · Auto-refresh 1h';
+        if (sub) sub.textContent = 'Kronos-base · 102M · N=' + (d.monte_carlo_n||100) + ' · ' + dev + ' · Manual refresh';
         updateCoinButtons();
         showCoinState();
       } else if (d.model_error) {

@@ -65,7 +65,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .timer-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:2px}
 .timer-rem{font-size:13px;color:var(--muted2);margin-top:4px}
 .btn-predict{width:100%;padding:14px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:14px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity 0.2s}
-.btn-predict:active{opacity:.8}
+.btn-predict:active{opacity:.7}
 .metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .metric{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
 .metric-value{font-size:26px;font-weight:800;line-height:1;margin-bottom:4px}
@@ -112,7 +112,7 @@ canvas{width:100%!important;height:100%!important}
   </button>
   <div class="header-logo">Foundation Model</div>
   <div class="header-title">Kronos Forecast</div>
-  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=50 · T=0.7 · Manual refresh</div>
+  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=100 · T=0.7 · Auto-refresh 1h</div>
 </div>
 
 <!-- Drawer overlay -->
@@ -284,7 +284,7 @@ canvas{width:100%!important;height:100%!important}
     <!-- Chart -->
     <div class="card">
       <div class="card-title">Forecast Chart (24h)</div>
-      <div class="chart-wrap"><canvas id="chart"></canvas></div>
+      <div class="chart-wrap"><canvas id="chart"></canvas></canvas></div>
     </div>
 
     <!-- Table -->
@@ -323,18 +323,18 @@ function startTimer() {
     var tr = document.getElementById('timerRemaining');
     var pf = document.getElementById('progFill');
     var elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
-    var em = String(Math.floor(elapsed/60)).padStart(2,'0');
-    var es = String(elapsed%60).padStart(2,'0');
+    var em = String(Math.floor(elapsed/60)).padStart(2, '0');
+    var es = String(elapsed%60).padStart(2, '0');
     if (te) te.textContent = em + ':' + es + ' elapsed';
     if (prog && prog.total > 0) {
       var remSecs = Math.max(0, prog.remaining_secs);
-      var rm = String(Math.floor(remSecs/60)).padStart(2,'0');
-      var rs = String(Math.floor(remSecs%60)).padStart(2,'0');
+      var rm = String(Math.floor(remSecs/60)).padStart(2, '0');
+      var rs = String(Math.floor(remSecs%60)).padStart(2, '0');
       if (tr) tr.textContent = 'MC ' + prog.current + '/' + prog.total +
         ' · ' + prog.secs_per_run.toFixed(1) + 's/run · ~' + rm + ':' + rs + ' remaining';
       if (pf) pf.style.width = prog.pct + '%';
     } else {
-      if (tr) tr.textContent = running ? 'Fetching data & preparing…' : 'Waiting to start…';
+      if (tr) tr.textContent = 'Fetching data & preparing…';
       if (pf) pf.style.width = '3%';
     }
   }, 1000);
@@ -370,7 +370,7 @@ function checkStatus() {
         var dev = d.device === 'directml' ? '⚡ Intel Arc GPU' : d.device === 'cuda' ? '⚡ NVIDIA GPU' : '💻 CPU';
         el.innerHTML = '<span>✅</span><span>Kronos-base ready · ' + dev + ' · N=' + (d.monte_carlo_n||100) + '</span>';
         var sub = document.getElementById('headerSub');
-        if (sub) sub.textContent = 'Kronos-base · 102M · N=' + (d.monte_carlo_n||100) + ' · ' + dev + ' · Manual refresh';
+        if (sub) sub.textContent = 'Kronos-base · 102M · N=' + (d.monte_carlo_n||100) + ' · ' + dev + ' · Auto-refresh 1h';
         updateCoinButtons();
         showCoinState();
       } else if (d.model_error) {
@@ -438,7 +438,7 @@ function startPolling() {
           }
         }
       }).catch(function(){});
-  }, 5000); // Poll every 5s during computation for real-time progress
+  }, 5000);
 }
 
 function loadCache() {
@@ -511,7 +511,7 @@ function showResults(d) {
   uEl.className = 'metric-value ' + (up >= 60 ? 'up' : up >= 40 ? 'warn' : 'down');
   var bar = document.getElementById('upsideBar');
   bar.style.width = up + '%';
-  bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)';
+  bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)');
 
   // Confidence
   var conf = d.confidence || 50;
@@ -630,16 +630,16 @@ function buildTable(d) {
   hours.forEach(function(i) {
     if (i >= fc.mean_close.length) return;
     var m = fc.mean_close[i], hi = fc.upper[i], lo = fc.lower[i];
-    var chg = ((m - d.last_price) / d.last_price * 100);
+    var chg = ((m - d.last_price) / d.last_price * 100;
     var tr = document.createElement('tr');
     tr.innerHTML =
       '<td><span class="hbadge">+' + (i+1) + 'h</span></td>' +
       '<td style="font-weight:600;color:' + (chg>=0?'var(--green)':'var(--red)') + '">' +
         fmt(m) + '<span style="font-size:10px;color:var(--muted2)">&nbsp;' +
-        (chg>=0?'+':'') + chg.toFixed(1) + '%</span></td>' +
+        (chg>=0?'+':'-') + chg.toFixed(1) + '%</span></td>' +
       '<td style="font-size:11px;text-align:right">' +
         '<span style="color:var(--green)">▲' + fmt(hi) + '</span><br>' +
-        '<span style="color:var(--red)">▼' + fmt(lo) + '</span></td>';
+        '<span style="color:var(--red)">▼' + fmt(lo) + '</span></td></tr>';
     tb.appendChild(tr);
   });
 }
@@ -693,7 +693,7 @@ livePx();
 setInterval(livePx, 10000);
 checkStatus();
 
-// ── Drawer (hamburger menu) ────────────────────────────────────────────────
+// ── Drawer (hamburger menu) ────────────────────────────────────────────────────────
 function openDrawer() {
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawerOverlay').classList.add('open');
@@ -702,7 +702,7 @@ function openDrawer() {
 
 function closeDrawer() {
   document.getElementById('drawer').classList.remove('open');
-  document.getElementById('drawerOverlay').classList.remove('open');
+  document.getElementById('drawer-overlay').classList.remove('open');
 }
 
 function loadAccuracy() {
@@ -732,10 +732,11 @@ function loadAccuracy() {
         '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% · Good model ≥ 55%</div>' +
       '</div>';
 
-      // Confidence buckets — the key insight
+      // Confidence buckets
       var confKeys = ['high', 'medium', 'low'];
       var confLabels = {high: '🟢 High Confidence (≥80%)', medium: '🟡 Medium (60–80%)', low: '🔴 Low (<60%)'};
       var hasConf = confKeys.some(function(k){ return byConf[k]; });
+      
       if (hasConf) {
         html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">';
         html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Accuracy by Confidence Level</div>';
@@ -748,9 +749,9 @@ function loadAccuracy() {
             '<div><div style="font-size:12px;font-weight:600">' + confLabels[k] + '</div>' +
             '<div style="font-size:11px;color:var(--muted2)">' + b.correct + '/' + b.total + ' correct</div></div>' +
             '<div style="font-size:18px;font-weight:800;color:' + bColor + '">' + b.pct + '%</div>' +
+          '</div>' +
           '</div>';
         });
-        html += '</div>';
       }
 
       // Per-coin stats

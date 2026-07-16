@@ -578,13 +578,28 @@ def run_prediction(symbol):
     lower      = pred["lower"]
     std        = pred["std"]
 
-    final_prices = closes[:, -1]
-    upside_prob  = float((final_prices > last_price).mean()) * 100
-    std_pct      = std / last_price * 100
-    hist_vol_pct = float(df["close"].pct_change().dropna().std() * 100)
-    vol_amp_prob = float((std_pct > hist_vol_pct).mean()) * 100
-    spread_pct   = (upper - lower) / last_price * 100
-    confidence   = round(max(0, 100 - spread_pct.mean() * 2), 1)
+    final_prices    = closes[:, -1]
+    raw_upside_prob = float((final_prices > last_price).mean()) * 100
+    # Fix 1: Hard cap 5%-95% - prevents false certainty (100% or 0% are statistical illusions)
+    upside_prob     = float(max(5.0, min(95.0, raw_upside_prob)))
+
+    std_pct         = std / last_price * 100
+    hist_vol_pct    = float(df["close"].pct_change().dropna().std() * 100)
+    vol_amp_prob    = float((std_pct > hist_vol_pct).mean()) * 100
+    spread_pct      = (upper - lower) / last_price * 100
+    avg_spread      = float(spread_pct.mean())
+
+    # Fix 2: Volatility-calibrated confidence
+    # If model's predicted range is tighter than actual historical volatility,
+    # it is hallucinating certainty - penalize heavily.
+    if avg_spread < hist_vol_pct:
+        confidence = round(max(10.0, 50.0 - (hist_vol_pct - avg_spread) * 3), 1)
+        hallucinating = True
+    else:
+        confidence = round(max(0.0, 100.0 - avg_spread * 2), 1)
+        hallucinating = False
+
+    print(f"[Kronos] {symbol} spread={avg_spread:.2f}% hist_vol={hist_vol_pct:.2f}% hallucinating={hallucinating} conf={confidence}", flush=True)
 
     signal_context = interpret_signals(
         upside_prob, sig["indicators"], sig["fear_greed"],
@@ -603,8 +618,10 @@ def run_prediction(symbol):
         "monte_carlo_n": MONTE_CARLO_N,
         "model":         MODEL_NAME,
         "device":        DEVICE_TYPE,
-        "upside_prob":   round(upside_prob, 1),
-        "confidence":    confidence,
+        "upside_prob":      round(upside_prob, 1),
+        "raw_upside_prob":  round(raw_upside_prob, 1),
+        "hallucinating":    hallucinating,
+        "confidence":       confidence,
         "vol_amp_prob":  round(vol_amp_prob, 1),
         "lookback_used": pred.get("lookback_used", LOOKBACK),
         "signal_context": signal_context,

@@ -316,32 +316,44 @@ var timerStartedAt = null;
 
 function startTimer() {
   if (timerInterval) return;
-  timerStartedAt = Date.now();
   timerInterval = setInterval(function() {
-    var prog = statusData.progress && statusData.progress[currentCoin];
+    var isRunning = statusData.running && statusData.running[currentCoin];
+    var startTime = statusData.running_since && statusData.running_since[currentCoin];
+    
     var te = document.getElementById('timerDisplay');
     var tr = document.getElementById('timerRemaining');
     var pf = document.getElementById('progFill');
-    var elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+    
+    if (!isRunning || !startTime) {
+      if (tr) tr.textContent = 'Queued - waiting for worker to start...';
+      if (pf) pf.style.width = '3%';
+      return;
+    }
+    
+    var now = Date.now() / 1000;
+    var elapsed = Math.floor(now - startTime);
+    if (elapsed < 0) elapsed = 0;
+    
     var em = String(Math.floor(elapsed/60)).padStart(2,'0');
     var es = String(elapsed%60).padStart(2,'0');
     if (te) te.textContent = em + ':' + es + ' elapsed';
+    
+    var prog = statusData.progress && statusData.progress[currentCoin];
     if (prog && prog.total > 0) {
       var remSecs = Math.max(0, prog.remaining_secs);
       var rm = String(Math.floor(remSecs/60)).padStart(2,'0');
       var rs = String(Math.floor(remSecs%60)).padStart(2,'0');
-      if (tr) tr.textContent = 'MC ' + prog.current + '/' + prog.total +
-        ' | ' + prog.secs_per_run.toFixed(1) + 's/run | ~' + rm + ':' + rs + ' remaining';
+      if (tr) tr.textContent = 'MC ' + prog.current + '/' + prog.total + ' | ' + prog.secs_per_run.toFixed(1) + 's/run | ~' + rm + ':' + rs + ' remaining';
       if (pf) pf.style.width = prog.pct + '%';
     } else {
-      if (tr) tr.textContent = 'Fetching data & preparing...';
+      if (tr) tr.textContent = 'Fetching data & preparing model...';
       if (pf) pf.style.width = '3%';
     }
   }, 1000);
 }
 
 function stopTimer() {
-  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; timerStartedAt = null; }
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
 }
 
 function fmt(v) {
@@ -438,7 +450,7 @@ function startPolling() {
           }
         }
       }).catch(function(){});
-  }, 5000); // Poll every 5s during computation for real-time progress
+  }, 5000);
 }
 
 function loadCache() {
@@ -466,6 +478,7 @@ function startPrediction() {
         d.status === 'already_running_or_queued'
           ? 'Already computing - please wait...'
           : 'Queued - will start after current prediction finishes...';
+      startTimer();
       startPolling();
     }).catch(function() {
       if (btn) { btn.textContent = '❌ Error - try again'; btn.disabled = false; }
@@ -479,12 +492,10 @@ function showResults(d) {
   stopTimer();
   document.getElementById('results').classList.remove('hidden');
 
-  // Refresh badge
   var rb = document.getElementById('refreshBadge');
   if (d.is_running) rb.classList.remove('hidden');
   else rb.classList.add('hidden');
 
-  // Staleness
   var ageText = '';
   if (d.age_minutes !== undefined) {
     ageText = d.age_minutes < 1 ? ' . Just updated' :
@@ -495,7 +506,6 @@ function showResults(d) {
   document.getElementById('updatedTime').innerHTML =
     'Last updated: ' + new Date(d.updated_at).toLocaleString() + ageText + staleHtml;
 
-  // Device badge
   var db = document.getElementById('deviceBadge');
   var gb = document.getElementById('gpuBadge');
   if (d.device && d.device !== 'cpu') {
@@ -504,7 +514,6 @@ function showResults(d) {
   }
   if (db) db.textContent = '🧠 Kronos-base . 102.3M . N=' + (d.monte_carlo_n||100) + ' . T=0.7 . P10/P90';
 
-  // Upside
   var up = d.upside_prob;
   var uEl = document.getElementById('upsideVal');
   uEl.textContent = up.toFixed(1) + '%';
@@ -513,13 +522,11 @@ function showResults(d) {
   bar.style.width = up + '%';
   bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)';
 
-  // Confidence
   var conf = d.confidence || 50;
   var confEl = document.getElementById('confidenceVal');
   confEl.textContent = conf.toFixed(0) + '%';
   confEl.className = 'metric-value ' + (conf >= 70 ? 'up' : conf >= 40 ? 'warn' : 'down');
 
-  // Accuracy
   if (d.accuracy && d.accuracy.total > 0) {
     document.getElementById('accuracyBox').classList.remove('hidden');
     var accEl = document.getElementById('accuracyVal');
@@ -529,12 +536,10 @@ function showResults(d) {
       d.accuracy.correct + ' correct out of ' + d.accuracy.total + ' predictions tracked';
   }
 
-  // Signal context
   if (d.signal_context) {
     var sc = d.signal_context;
     var sumEl = document.getElementById('contextSummary');
 
-    // Show hallucination warning prominently if detected
     if (d.hallucinating) {
       sumEl.innerHTML = '<span style="color:var(--red);font-weight:700">⚠ Model Hallucinating Certainty</span><br>' +
         '<span style="font-size:11px;color:var(--muted2)">Predicted range is tighter than historical volatility. Confidence has been reduced. Do not trust extreme upside/downside readings.</span>';
@@ -558,7 +563,6 @@ function showResults(d) {
     }
   }
 
-  // Price target
   var fc = d.forecast;
   var lastMean = fc.mean_close[fc.mean_close.length-1];
   var lastHigh = fc.upper[fc.upper.length-1];
@@ -571,7 +575,6 @@ function showResults(d) {
   document.getElementById('tHigh').textContent = '▲ ' + fmt(lastHigh);
   document.getElementById('tLow').textContent  = '▼ ' + fmt(lastLow);
 
-  // Technical indicators
   if (d.indicators) {
     var ind = d.indicators;
     var rsi = ind.rsi;
@@ -604,10 +607,9 @@ function showResults(d) {
     fgEl.className = 'ind-val';
   }
 
-  // Crypto-native signals
   if (d.funding) {
     var fundEl = document.getElementById('fundingVal');
-    fundEl.textContent = d.funding.rate.toFixed(3) + '% . ' + d.funding.label;
+    fundEl.textContent = d.funding.rate !== null ? (d.funding.rate.toFixed(3) + '% . ' + d.funding.label) : 'N/A';
     fundEl.className = 'signal-val ' +
       (d.funding.label === 'Overcrowded Longs' ? 'warn' :
        d.funding.label === 'Overcrowded Shorts' ? 'up' : '');
@@ -704,7 +706,6 @@ livePx();
 setInterval(livePx, 10000);
 checkStatus();
 
-// ── Drawer (hamburger menu) ────────────────────────────────────────────────
 function openDrawer() {
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawerOverlay').classList.add('open');
@@ -730,7 +731,6 @@ function loadAccuracy() {
         return;
       }
 
-      // Overall stats
       var totalAll = keys.reduce(function(s,k){return s+byCoin[k].total;}, 0);
       var correctAll = keys.reduce(function(s,k){return s+byCoin[k].correct;}, 0);
       var overallPct = totalAll > 0 ? (correctAll/totalAll*100).toFixed(1) : '-';
@@ -743,7 +743,6 @@ function loadAccuracy() {
         '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% . Good model ≥ 55%</div>' +
       '</div>';
 
-      // Confidence buckets - the key insight
       var confKeys = ['high', 'medium', 'low'];
       var confLabels = {high: '🟢 High Confidence (≥80%)', medium: '🟡 Medium (60–80%)', low: '🔴 Low (<60%)'};
       var hasConf = confKeys.some(function(k){ return byConf[k]; });
@@ -764,7 +763,6 @@ function loadAccuracy() {
         html += '</div>';
       }
 
-      // Per-coin stats
       html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">By Coin</div>';
       keys.sort(function(a,b){ return byCoin[b].total - byCoin[a].total; });
       keys.forEach(function(sym) {
@@ -786,7 +784,6 @@ function loadAccuracy() {
 
       el.innerHTML = html;
 
-      // Update info section
       if (statusData.device) {
         var devEl = document.getElementById('infoDevice');
         if (devEl) devEl.textContent = statusData.device === 'directml' ? 'Intel Arc (CPU-bound)' :

@@ -533,9 +533,16 @@ function showResults(d) {
   if (d.signal_context) {
     var sc = d.signal_context;
     var sumEl = document.getElementById('contextSummary');
-    sumEl.textContent = sc.context;
-    sumEl.style.color = sc.n_confirm > sc.n_warn ? 'var(--green)' :
-                        sc.n_warn > sc.n_confirm ? 'var(--orange)' : 'var(--muted2)';
+
+    // Show hallucination warning prominently if detected
+    if (d.hallucinating) {
+      sumEl.innerHTML = '<span style="color:var(--red);font-weight:700">⚠ Model Hallucinating Certainty</span><br>' +
+        '<span style="font-size:11px;color:var(--muted2)">Predicted range is tighter than historical volatility. Confidence has been reduced. Do not trust extreme upside/downside readings.</span>';
+    } else {
+      sumEl.textContent = sc.context;
+      sumEl.style.color = sc.n_confirm > sc.n_warn ? 'var(--green)' :
+                          sc.n_warn > sc.n_confirm ? 'var(--orange)' : 'var(--muted2)';
+    }
     var cDiv = document.getElementById('confirmations');
     cDiv.innerHTML = '';
     (sc.confirmations || []).forEach(function(c) {
@@ -586,11 +593,15 @@ function showResults(d) {
     document.getElementById('sma20Val').textContent = fmt(ind.sma20);
   }
 
-  if (d.fear_greed && d.fear_greed.value !== undefined) {
+  if (d.fear_greed && d.fear_greed.value !== undefined && d.fear_greed.value !== null) {
     var fg = d.fear_greed;
     var fgEl = document.getElementById('fgVal');
     fgEl.textContent = fg.value + ' ' + fg.label;
     fgEl.className = 'ind-val ' + (fg.value >= 60 ? 'up' : fg.value <= 30 ? 'down' : 'warn');
+  } else {
+    var fgEl = document.getElementById('fgVal');
+    fgEl.textContent = 'N/A';
+    fgEl.className = 'ind-val';
   }
 
   // Crypto-native signals

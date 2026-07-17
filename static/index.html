@@ -144,7 +144,8 @@ canvas{width:100%!important;height:100%!important}
     <div class="info-row"><span class="info-label">Device</span><span class="info-val" id="infoDevice">—</span></div>
     <div class="info-row"><span class="info-label">Monte Carlo N</span><span class="info-val" id="infoN">—</span></div>
     <div class="info-row"><span class="info-label">Lookback</span><span class="info-val">384h (16 days)</span></div>
-    <div class="info-row"><span class="info-label">Refresh</span><span class="info-val">Every 1 hour</span></div>
+    <div class="info-row"><span class="info-label">Refresh</span><span class="info-val">Manual only</span></div>
+    <div class="info-row"><span class="info-label">Requests (24h)</span><span class="info-val" id="infoRequests">—</span></div>
     <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">BTC ETH BNB SOL ADA ZEC TAO</span></div>
   </div>
 
@@ -792,6 +793,15 @@ function loadAccuracy() {
       if (statusData.monte_carlo_n) {
         var nEl = document.getElementById('infoN');
         if (nEl) nEl.textContent = statusData.monte_carlo_n;
+      }
+      // Show request count
+      if (statusData.requests_24h) {
+        var reqEl = document.getElementById('infoRequests');
+        if (reqEl) {
+          var r = statusData.requests_24h;
+          var byCoins = Object.entries(r.by_coin || {}).map(function(e){ return e[0]+':'+e[1]; }).join(', ');
+          reqEl.textContent = r.total_24h + ' total' + (byCoins ? ' (' + byCoins + ')' : '');
+        }
       }
     }).catch(function(e) {
       document.getElementById('accuracyList').innerHTML =

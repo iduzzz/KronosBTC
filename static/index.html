@@ -176,7 +176,10 @@ canvas{width:100%!important;height:100%!important}
 </div>
 <div class="price-bar">
   <div><div class="live-label" id="priceLabel">BTC / USDT</div><div class="live-price" id="livePrice">—</div></div>
-  <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+  <div style="display:flex;align-items:center;gap:10px">
+    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
+    <button onclick="startPrediction()" style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent">🔄 Run</button>
+  </div>
 </div>
 <div class="content">
   <div class="status-row" id="statusRow"><span>⏳</span><span>Connecting…</span></div>

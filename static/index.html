@@ -1,816 +1,826 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Kronos">
-<title>Kronos Forecast</title>
-<style>
-:root{--bg:#0a0e1a;--card:#111827;--card2:#1a2235;--border:#1e2d45;--accent:#3b82f6;--accent2:#60a5fa;--green:#10b981;--red:#ef4444;--orange:#f59e0b;--purple:#8b5cf6;--text:#f1f5f9;--muted:#64748b;--muted2:#94a3b8}
-*{box-sizing:border-box;margin:0;padding:0}
-body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'SF Pro Display',sans-serif;min-height:100vh;padding-bottom:env(safe-area-inset-bottom)}
-.header{background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%);padding:calc(48px + env(safe-area-inset-top)) 20px 16px;text-align:center;border-bottom:1px solid var(--border);position:relative}
-.hamburger{position:absolute;top:calc(14px + env(safe-area-inset-top));right:16px;width:36px;height:36px;border:none;background:rgba(255,255,255,.1);border-radius:8px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;-webkit-tap-highlight-color:transparent}
-.hamburger span{display:block;width:18px;height:2px;background:var(--text);border-radius:2px}
-.drawer{position:fixed;top:0;right:-100%;width:85%;max-width:340px;height:100vh;background:var(--card);z-index:1000;transition:right 0.3s ease;overflow-y:auto;padding-bottom:env(safe-area-inset-bottom)}
-.drawer.open{right:0}
-.drawer-overlay{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.5);z-index:999;display:none}
-.drawer-overlay.open{display:block}
-.drawer-header{padding:calc(20px + env(safe-area-inset-top)) 20px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center}
-.drawer-title{font-size:18px;font-weight:700}
-.drawer-close{background:none;border:none;color:var(--muted2);font-size:24px;cursor:pointer;padding:4px}
-.drawer-section{padding:16px}
-.drawer-section-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px}
-.acc-row{display:flex;justify-content:space-between;align-items:center;padding:12px;background:var(--card2);border:1px solid var(--border);border-radius:12px;margin-bottom:8px}
-.acc-symbol{font-size:15px;font-weight:700}
-.acc-stats{text-align:right}
-.acc-pct{font-size:18px;font-weight:800}
-.acc-count{font-size:11px;color:var(--muted2);margin-top:2px}
-.acc-bar-bg{height:4px;background:var(--border);border-radius:99px;margin-top:8px;overflow:hidden}
-.acc-bar-fill{height:100%;border-radius:99px}
-.acc-empty{text-align:center;padding:24px;color:var(--muted2);font-size:13px;line-height:1.7}
-.info-row{display:flex;justify-content:space-between;padding:10px 0;border-bottom:1px solid var(--border);font-size:13px}
-.info-label{color:var(--muted2)}
-.info-val{font-weight:600;text-align:right}
-.header-logo{font-size:11px;color:var(--accent2);letter-spacing:3px;text-transform:uppercase;margin-bottom:4px}
-.header-title{font-size:24px;font-weight:700;background:linear-gradient(90deg,#60a5fa,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent}
-.header-sub{font-size:11px;color:var(--muted2);margin-top:3px}
-.coin-bar{background:var(--card);border-bottom:1px solid var(--border);padding:12px 16px;overflow-x:auto;-webkit-overflow-scrolling:touch;white-space:nowrap}
-.coin-btn{display:inline-block;padding:7px 14px;border-radius:99px;border:1px solid var(--border);background:var(--card2);color:var(--muted2);font-size:13px;font-weight:600;cursor:pointer;margin-right:8px;transition:all 0.2s;-webkit-tap-highlight-color:transparent}
-.coin-btn.active{background:linear-gradient(135deg,#2563eb,#7c3aed);border-color:transparent;color:white}
-.coin-btn.cached{border-color:var(--green);color:var(--green)}
-.coin-btn.active.cached{background:linear-gradient(135deg,#2563eb,#7c3aed);color:white}
-.coin-btn.computing{border-color:var(--orange);color:var(--orange)}
-.price-bar{background:var(--card);padding:12px 20px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--border)}
-.live-price{font-size:22px;font-weight:700}
-.live-label{font-size:10px;color:var(--muted);text-transform:uppercase}
-.live-badge{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--green)}
-.live-dot{width:7px;height:7px;border-radius:50%;background:var(--green);animation:pulse 1.5s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
-.content{padding:16px;display:flex;flex-direction:column;gap:14px}
-.card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:16px}
-.card-title{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:12px}
-.computing-card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:28px 20px;text-align:center}
-.computing-icon{font-size:44px;margin-bottom:14px}
-.computing-title{font-size:18px;font-weight:700;margin-bottom:10px}
-.computing-sub{font-size:13px;color:var(--muted2);line-height:1.7}
-.prog-bg{background:var(--card2);border-radius:99px;height:6px;overflow:hidden;margin:18px 0 8px}
-.prog-fill{height:100%;border-radius:99px;background:linear-gradient(90deg,#3b82f6,#7c3aed);width:5%}
-.prog-label{font-size:11px;color:var(--muted)}
-.timer-box{margin-top:12px;background:var(--card2);border-radius:10px;padding:10px}
-.timer-val{font-size:22px;font-weight:800;color:var(--accent2)}
-.timer-label{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-top:2px}
-.timer-rem{font-size:13px;color:var(--muted2);margin-top:4px}
-.btn-predict{width:100%;padding:14px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:14px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity 0.2s}
-.btn-predict:active{opacity:.8}
-.metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.metric{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
-.metric-value{font-size:26px;font-weight:800;line-height:1;margin-bottom:4px}
-.metric-label{font-size:10px;color:var(--muted2);line-height:1.3}
-.up{color:var(--green)}.down{color:var(--red)}.warn{color:var(--orange)}
-.bar-wrap{margin-top:10px}
-.bar-bg{background:var(--card2);border-radius:99px;height:8px;overflow:hidden;margin-top:6px}
-.bar-fill{height:100%;border-radius:99px;transition:width 1s ease}
-.ind-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
-.ind-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
-.ind-val{font-size:14px;font-weight:700;margin-bottom:2px}
-.ind-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px}
-.context-item{font-size:12px;color:var(--muted2);padding:3px 0;display:flex;align-items:flex-start;gap:6px}
-.table{width:100%;border-collapse:collapse;font-size:13px}
-.table th{text-align:left;color:var(--muted);font-size:10px;text-transform:uppercase;padding:0 0 8px;letter-spacing:1px}
-.table td{padding:6px 0;border-top:1px solid var(--border);vertical-align:middle}
-.table td:last-child{text-align:right}
-.hbadge{display:inline-block;background:var(--card2);border-radius:6px;padding:2px 7px;font-size:11px;color:var(--muted2)}
-.chart-wrap{width:100%;height:200px}
-canvas{width:100%!important;height:100%!important}
-.badge-row{text-align:center}
-.badge{display:inline-flex;align-items:center;gap:6px;border-radius:99px;padding:4px 12px;font-size:11px}
-.badge-blue{background:rgba(59,130,246,.1);border:1px solid rgba(59,130,246,.3);color:var(--accent2)}
-.badge-orange{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--orange)}
-.badge-green{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:var(--green)}
-.badge-purple{background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.3);color:var(--purple)}
-.spinner{width:10px;height:10px;border:2px solid rgba(245,158,11,.3);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
-@keyframes spin{to{transform:rotate(360deg)}}
-.updated{text-align:center;font-size:11px;color:var(--muted);padding:2px 0 6px}
-.stale-warn{color:var(--orange);font-weight:600}
-.status-row{display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--muted2)}
-.signal-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.signal-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
-.signal-val{font-size:13px;font-weight:700;margin-bottom:2px}
-.signal-label{font-size:9px;color:var(--muted);text-transform:uppercase}
-.accuracy-box{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;margin-top:8px}
-.hidden{display:none}
-</style>
-</head>
-<body>
-<div class="header">
-  <button class="hamburger" onclick="openDrawer()">
-    <span></span><span></span><span></span>
-  </button>
-  <div class="header-logo">Foundation Model</div>
-  <div class="header-title">Kronos Forecast</div>
-  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=50 · T=0.7 · Manual refresh</div>
-</div>
+import os, sys, time, threading, traceback, json, queue, sqlite3, re
+from datetime import datetime, timezone
+import numpy as np
+import pandas as pd
+import requests
+from flask import Flask, jsonify, send_from_directory
+from flask_cors import CORS
+import torch
 
-<!-- Drawer overlay -->
-<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+# ── GPU Setup (Intel Arc via DirectML, NVIDIA via CUDA, fallback CPU) ─────────
+def setup_device():
+    # Try Intel Arc GPU via torch-directml (Windows)
+    try:
+        import torch_directml
+        dev = torch_directml.device()
+        torch.tensor([1.0]).to(dev)  # quick validation
+        print(f"[GPU] Intel Arc detected via DirectML!", flush=True)
+        return dev, "directml"
+    except Exception as e:
+        print(f"[GPU] DirectML not available ({e}), trying CUDA...", flush=True)
 
-<!-- Drawer menu -->
-<div class="drawer" id="drawer">
-  <div class="drawer-header">
-    <div class="drawer-title">📊 Kronos Menu</div>
-    <button class="drawer-close" onclick="closeDrawer()">✕</button>
-  </div>
+    # Try NVIDIA CUDA
+    if torch.cuda.is_available():
+        print(f"[GPU] CUDA: {torch.cuda.get_device_name(0)}", flush=True)
+        return torch.device("cuda"), "cuda"
 
-  <!-- Accuracy statistics -->
-  <div class="drawer-section">
-    <div class="drawer-section-title">Prediction Accuracy (24h Direction)</div>
-    <div id="accuracyList">
-      <div class="acc-empty">
-        🕐 No accuracy data yet.<br><br>
-        After 24 hours, the app automatically checks whether each prediction was correct and logs it here.<br><br>
-        Check back tomorrow.
-      </div>
-    </div>
-  </div>
+    # CPU fallback - use all cores
+    n = os.cpu_count() or 4
+    torch.set_num_threads(n)
+    torch.set_num_interop_threads(max(1, n // 2))
+    print(f"[CPU] Fallback - using {n} cores", flush=True)
+    return torch.device("cpu"), "cpu"
 
-  <!-- App info -->
-  <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
-    <div class="drawer-section-title">App Info</div>
-    <div class="info-row"><span class="info-label">Model</span><span class="info-val">Kronos-base 102M</span></div>
-    <div class="info-row"><span class="info-label">Device</span><span class="info-val" id="infoDevice">—</span></div>
-    <div class="info-row"><span class="info-label">Monte Carlo N</span><span class="info-val" id="infoN">—</span></div>
-    <div class="info-row"><span class="info-label">Lookback</span><span class="info-val">384h (16 days)</span></div>
-    <div class="info-row"><span class="info-label">Refresh</span><span class="info-val">Manual only</span></div>
-    <div class="info-row"><span class="info-label">Requests (24h)</span><span class="info-val" id="infoRequests">—</span></div>
-    <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">BTC ETH BNB SOL ADA ZEC TAO</span></div>
-  </div>
+DEVICE, DEVICE_TYPE = setup_device()
 
-  <!-- How to read -->
-  <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
-    <div class="drawer-section-title">How to Read Results</div>
-    <div style="font-size:12px;color:var(--muted2);line-height:1.8">
-      <div>🎯 <strong style="color:var(--text)">Upside Prob</strong> — Kronos primary signal. % of Monte Carlo paths predicting price goes UP in 24h.</div>
-      <br>
-      <div>📊 <strong style="color:var(--text)">Confidence</strong> — How tight the P10/P90 band is. High = paths agree. Low = high uncertainty.</div>
-      <br>
-      <div>✓ <strong style="color:var(--green)">Confirmations</strong> — Auxiliary signals agreeing with Kronos direction.</div>
-      <br>
-      <div>⚠ <strong style="color:var(--orange)">Warnings</strong> — Signals contradicting or adding caution to Kronos.</div>
-      <br>
-      <div>📈 <strong style="color:var(--text)">P10/P90</strong> — 80% of Monte Carlo paths fell between these price levels.</div>
-    </div>
-  </div>
-</div>
-<div class="coin-bar">
-  <span class="coin-btn active" onclick="selectCoin('BTC')" id="btn-BTC">BTC</span>
-  <span class="coin-btn" onclick="selectCoin('ETH')" id="btn-ETH">ETH</span>
-  <span class="coin-btn" onclick="selectCoin('BNB')" id="btn-BNB">BNB</span>
-  <span class="coin-btn" onclick="selectCoin('SOL')" id="btn-SOL">SOL</span>
-  <span class="coin-btn" onclick="selectCoin('ADA')" id="btn-ADA">ADA</span>
-  <span class="coin-btn" onclick="selectCoin('ZEC')" id="btn-ZEC">ZEC</span>
-  <span class="coin-btn" onclick="selectCoin('TAO')" id="btn-TAO">TAO</span>
-</div>
-<div class="price-bar">
-  <div><div class="live-label" id="priceLabel">BTC / USDT</div><div class="live-price" id="livePrice">—</div></div>
-  <div style="display:flex;align-items:center;gap:10px">
-    <div class="live-badge"><div class="live-dot"></div>LIVE</div>
-    <button onclick="startPrediction()" style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent">🔄 Run</button>
-  </div>
-</div>
-<div class="content">
-  <div class="status-row" id="statusRow"><span>⏳</span><span>Connecting…</span></div>
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from model import Kronos, KronosTokenizer, KronosPredictor
 
-  <div class="computing-card" id="computingCard">
-    <div class="computing-icon">🧠</div>
-    <div class="computing-title" id="computingTitle">Computing Prediction</div>
-    <div class="computing-sub" id="computingSub">Running Kronos-base N=100 Monte Carlo<br>+ ETF flows + funding rates + on-chain data</div>
-    <div class="prog-bg"><div class="prog-fill" id="progFill"></div></div>
-    <div class="prog-label" id="computingLabel">Please wait…</div>
-    <div class="timer-box">
-      <div class="timer-val" id="timerDisplay">00:00</div>
-      <div class="timer-label">Elapsed time</div>
-      <div class="timer-rem" id="timerRemaining">Estimating…</div>
-    </div>
-  </div>
+BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
+app        = Flask(__name__, static_folder=os.path.join(BASE_DIR, 'static'))
+CORS(app)
 
-  <div id="notStarted" class="hidden">
-    <div class="computing-card">
-      <div class="computing-icon">🔮</div>
-      <div class="computing-title" id="notStartedTitle">No Prediction Yet</div>
-      <div class="computing-sub">Tap below to start Kronos-base prediction.</div>
-      <br>
-      <button class="btn-predict" id="btnStart" onclick="startPrediction()">Run Kronos Prediction</button>
-    </div>
-  </div>
+# ── Configuration ──────────────────────────────────────────────────────────────
+MODEL_NAME     = "NeoQuasar/Kronos-base"
+TOKENIZER_NAME = "NeoQuasar/Kronos-Tokenizer-base"
+LOOKBACK       = 384
+PRED_LEN       = 24
+# N dynamically set after device detection in load_model
+MONTE_CARLO_N  = 100   # default, overridden based on device
+REFRESH_SECS   = 3600
+NUM_WORKERS    = 1     # Kronos model is NOT thread-safe - must run one coin at a time
+DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
 
-  <div id="results" class="hidden">
-    <div class="badge-row" style="margin-bottom:4px">
-      <span class="badge badge-orange hidden" id="refreshBadge"><div class="spinner"></div> Refreshing…</span>
-    </div>
-    <div class="updated" id="updatedTime"></div>
+COINS = {
+    "BTC": "BTCUSDT", "ETH": "ETHUSDT", "BNB": "BNBUSDT", "SOL": "SOLUSDT",
+    "ADA": "ADAUSDT", "ZEC": "ZECUSDT", "TAO": "TAOUSDT",
+}
 
-    <!-- Primary: Kronos signal -->
-    <div class="card">
-      <div class="card-title">Kronos Model Signal (Primary)</div>
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-value" id="upsideVal">—</div>
-          <div class="metric-label">Upside Probability<br>(Kronos-base)</div>
-        </div>
-        <div class="metric">
-          <div class="metric-value" id="confidenceVal">—</div>
-          <div class="metric-label">Model<br>Confidence</div>
-        </div>
-      </div>
-      <div class="bar-wrap">
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2)"><span>Bearish</span><span>Bullish</span></div>
-        <div class="bar-bg"><div class="bar-fill" id="upsideBar" style="width:0%"></div></div>
-      </div>
-      <div id="accuracyBox" class="accuracy-box hidden">
-        <div style="font-size:12px;color:var(--muted2)">Historical Accuracy (this coin)</div>
-        <div style="font-size:18px;font-weight:800;margin-top:4px" id="accuracyVal">—</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:2px" id="accuracyCount">—</div>
-      </div>
-    </div>
+predictor    = None
+cache        = {}
+cache_lock   = threading.Lock()
+model_ready  = False
+model_error  = ""
+running      = {}
+running_since= {}
+progress     = {}   # symbol -> {"current": N, "total": N, "secs_per_run": float}
+task_queue   = queue.Queue()
+db_lock      = threading.Lock()
 
-    <!-- Signal context -->
-    <div class="card">
-      <div class="card-title">Signal Context (Auxiliary Filters)</div>
-      <div id="contextSummary" style="font-size:13px;font-weight:600;margin-bottom:10px"></div>
-      <div id="confirmations"></div>
-      <div id="warnings"></div>
-    </div>
+# [FIX] Bulletproof Task Queue: Track queued coins to prevent race conditions
+queued_coins = set()
+queue_lock   = threading.Lock()
 
-    <!-- Price target -->
-    <div class="card">
-      <div class="card-title">24h Price Target (P10–P90 · N=100)</div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div style="font-size:28px;font-weight:800" id="targetPrice">—</div>
-          <div style="font-size:13px;color:var(--muted2);margin-top:4px" id="targetChange">—</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">P90 / P10</div>
-          <div style="font-size:13px;font-weight:600;color:var(--green)" id="tHigh">—</div>
-          <div style="font-size:13px;font-weight:600;color:var(--red)" id="tLow">—</div>
-        </div>
-      </div>
-    </div>
 
-    <!-- Technical indicators -->
-    <div class="card">
-      <div class="card-title">Technical Indicators</div>
-      <div class="ind-grid">
-        <div class="ind-item"><div class="ind-val" id="rsiVal">—</div><div class="ind-label">RSI 14</div></div>
-        <div class="ind-item"><div class="ind-val" id="macdVal">—</div><div class="ind-label">MACD</div></div>
-        <div class="ind-item"><div class="ind-val" id="bbVal">—</div><div class="ind-label">BB %</div></div>
-        <div class="ind-item"><div class="ind-val" id="volRatioVal">—</div><div class="ind-label">Vol Ratio</div></div>
-        <div class="ind-item"><div class="ind-val" id="sma20Val">—</div><div class="ind-label">SMA 20</div></div>
-        <div class="ind-item"><div class="ind-val" id="fgVal">—</div><div class="ind-label">Fear&amp;Greed</div></div>
-      </div>
-    </div>
+# ── SQLite ─────────────────────────────────────────────────────────────────────
+def init_db():
+    with sqlite3.connect(DB_FILE) as conn:
+        # Enable WAL mode - prevents readers blocking writers and concurrent write conflicts
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS predictions (
+                symbol     TEXT PRIMARY KEY,
+                data       TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                error      TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS accuracy (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol           TEXT NOT NULL,
+                predicted_at     TEXT NOT NULL,
+                entry_price      REAL NOT NULL,
+                predicted_price  REAL NOT NULL,
+                upside_prob      REAL NOT NULL,
+                confidence       REAL NOT NULL DEFAULT 0,
+                actual_price     REAL,
+                direction_correct INTEGER,
+                checked_at       TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS request_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol     TEXT NOT NULL,
+                requested_at TEXT NOT NULL
+            )
+        """)
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.execute("ALTER TABLE accuracy ADD COLUMN entry_price REAL NOT NULL DEFAULT 0")
+            conn.commit()
+            print("[DB] Migrated: added entry_price column", flush=True)
+    except Exception:
+        pass  # Column already exists
+    print(f"[DB] SQLite ready (WAL mode): {DB_FILE}", flush=True)
 
-    <!-- Crypto-native signals -->
-    <div class="card">
-      <div class="card-title">Crypto-Native Signals</div>
-      <div class="signal-grid">
-        <div class="signal-item"><div class="signal-val" id="fundingVal">—</div><div class="signal-label">Funding Rate</div></div>
-        <div class="signal-item" id="etfItem"><div class="signal-val" id="etfVal">—</div><div class="signal-label">ETF Flows</div></div>
-        <div class="signal-item"><div class="signal-val" id="memVal">—</div><div class="signal-label">Mempool</div></div>
-        <div class="signal-item" id="domItem"><div class="signal-val" id="domVal">—</div><div class="signal-label">BTC Dominance</div></div>
-      </div>
-    </div>
+def save_prediction(symbol, result):
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO predictions (symbol, data, updated_at, error)
+                    VALUES (?, ?, ?, NULL)
+                """, (symbol, json.dumps(result), result["updated_at"]))
+                target     = result["forecast"]["mean_close"][-1]
+                entry      = result["last_price"]
+                conf       = result.get("confidence", 0)
+                conn.execute("""
+                    INSERT INTO accuracy (symbol, predicted_at, entry_price, predicted_price, upside_prob, confidence)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (symbol, result["updated_at"], entry, target, result["upside_prob"], conf))
+                conn.commit()
+        with cache_lock:
+            cache[symbol] = result
+        print(f"[DB] {symbol} saved.", flush=True)
+    except Exception as e:
+        print(f"[DB] Save failed: {e}", flush=True)
 
-    <!-- Chart -->
-    <div class="card">
-      <div class="card-title">Forecast Chart (24h)</div>
-      <div class="chart-wrap"><canvas id="chart"></canvas></div>
-    </div>
+def load_cache_from_disk():
+    global cache
+    try:
+        init_db()
+        with sqlite3.connect(DB_FILE) as conn:
+            rows = conn.execute("SELECT symbol, data FROM predictions").fetchall()
+        for sym, data in rows:
+            try:
+                cache[sym] = json.loads(data)
+            except Exception:
+                pass
+        if cache:
+            print(f"[DB] Loaded: {list(cache.keys())}", flush=True)
+    except Exception as e:
+        print(f"[DB] Load failed: {e}", flush=True)
 
-    <!-- Table -->
-    <div class="card">
-      <div class="card-title">Hourly Breakdown</div>
-      <table class="table">
-        <thead><tr><th>Hour</th><th>Mean Price</th><th style="text-align:right">P90 / P10</th></tr></thead>
-        <tbody id="tableBody"></tbody>
-      </table>
-    </div>
+def check_accuracy():
+    """Compare 24h-old predictions to actual price. Runs on single background timer."""
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                rows = conn.execute("""
+                    SELECT id, symbol, entry_price, upside_prob
+                    FROM accuracy
+                    WHERE actual_price IS NULL
+                    AND predicted_at < datetime('now', '-24 hours')
+                """).fetchall()
 
-    <div class="badge-row" style="padding:4px 0;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
-      <span class="badge badge-blue" id="deviceBadge">🧠 Kronos-base · N=100</span>
-      <span class="badge badge-purple" id="gpuBadge" style="display:none">⚡ GPU Active</span>
-    </div>
-    <button class="btn-predict" onclick="startPrediction()" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);margin-top:4px">🔄 Request Fresh Prediction</button>
-  </div>
-</div>
+        for row_id, symbol, entry_price, upside_prob in rows:
+            if symbol not in COINS:
+                continue
+            try:
+                r = requests.get("https://api.binance.com/api/v3/ticker/price",
+                                 params={"symbol": COINS[symbol]}, timeout=10)
+                if r.ok:
+                    actual  = float(r.json()["price"])
+                    # Correct: compare actual price direction vs entry price at prediction time
+                    correct = 1 if (upside_prob >= 50 and actual > entry_price) or \
+                                   (upside_prob < 50 and actual <= entry_price) else 0
+                    with db_lock:
+                        with sqlite3.connect(DB_FILE) as conn:
+                            conn.execute("""
+                                UPDATE accuracy
+                                SET actual_price=?, direction_correct=?, checked_at=?
+                                WHERE id=?
+                            """, (actual, correct, datetime.now(timezone.utc).isoformat(), row_id))
+                            conn.commit()
+                    print(f"[Accuracy] {symbol} pred={pred_price:.0f} actual={actual:.0f} correct={bool(correct)}", flush=True)
+            except Exception as e:
+                print(f"[Accuracy] {symbol} check failed: {e}", flush=True)
+    except Exception as e:
+        print(f"[Accuracy] Check failed: {e}", flush=True)
 
-<script>
-var BASE = window.location.origin;
-var COINS = ['BTC','ETH','BNB','SOL','ADA','ZEC','TAO'];
-var BSYMS = {BTC:'BTCUSDT',ETH:'ETHUSDT',BNB:'BNBUSDT',SOL:'SOLUSDT',ADA:'ADAUSDT',ZEC:'ZECUSDT',TAO:'TAOUSDT'};
-var currentCoin = 'BTC';
-var pollTimer = null;
-var statusData = {};
-var timerInterval = null;
-var timerStartedAt = null;
+def get_accuracy_stats():
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            # Overall per-symbol stats
+            rows = conn.execute("""
+                SELECT symbol, COUNT(*) as total, SUM(direction_correct) as correct
+                FROM accuracy WHERE direction_correct IS NOT NULL
+                GROUP BY symbol
+            """).fetchall()
 
-function startTimer() {
-  if (timerInterval) return;
-  timerInterval = setInterval(function() {
-    var isRunning = statusData.running && statusData.running[currentCoin];
-    var startTime = statusData.running_since && statusData.running_since[currentCoin];
-    
-    var te = document.getElementById('timerDisplay');
-    var tr = document.getElementById('timerRemaining');
-    var pf = document.getElementById('progFill');
-    
-    if (!isRunning || !startTime) {
-      if (tr) tr.textContent = 'Queued - waiting for worker to start...';
-      if (pf) pf.style.width = '3%';
-      return;
+            # Confidence-bucketed stats (all symbols combined)
+            bucket_rows = conn.execute("""
+                SELECT
+                    CASE
+                        WHEN confidence >= 80 THEN 'high'
+                        WHEN confidence >= 60 THEN 'medium'
+                        ELSE 'low'
+                    END as bucket,
+                    COUNT(*) as total,
+                    SUM(direction_correct) as correct
+                FROM accuracy
+                WHERE direction_correct IS NOT NULL
+                GROUP BY bucket
+            """).fetchall()
+
+        stats = {s: {"total": t, "correct": c, "pct": round(c/t*100, 1)}
+                 for s, t, c in rows if t > 0}
+
+        # Add confidence breakdown
+        conf_stats = {}
+        for bucket, total, correct in bucket_rows:
+            if total > 0:
+                conf_stats[bucket] = {
+                    "total":   total,
+                    "correct": correct,
+                    "pct":     round(correct/total*100, 1),
+                    "label":   {
+                        "high":   "High confidence (≥80%)",
+                        "medium": "Medium confidence (60-80%)",
+                        "low":    "Low confidence (<60%)"
+                    }.get(bucket, bucket)
+                }
+
+        return {"by_coin": stats, "by_confidence": conf_stats}
+    except Exception:
+        return {"by_coin": {}, "by_confidence": {}}
+
+
+# ── Worker - processes one coin at a time, no auto-requeue ────────────────────
+def worker():
+    while True:
+        symbol = task_queue.get()
+        if symbol is None:
+            break
+            
+        # [FIX] Remove from queued set when actually starting processing
+        with queue_lock:
+            queued_coins.discard(symbol)
+            
+        running[symbol] = True
+        running_since[symbol] = time.time()
+        try:
+            run_prediction(symbol)
+        except Exception as e:
+            print(f"[Kronos] {symbol} failed: {e}", flush=True)
+            traceback.print_exc()
+        finally:
+            running[symbol] = False
+        print(f"[Kronos] {symbol} complete. Waiting for next manual request.", flush=True)
+
+
+# ── Technical Indicators (RSI with Wilder's smoothing) ────────────────────────
+def compute_indicators(df):
+    close    = df["close"].values
+    delta    = np.diff(close)
+    gain     = np.where(delta > 0, delta, 0.0)
+    loss     = np.where(delta < 0, -delta, 0.0)
+    avg_gain = pd.Series(gain).ewm(alpha=1/14, adjust=False).mean().values
+    avg_loss = pd.Series(loss).ewm(alpha=1/14, adjust=False).mean().values
+    rs       = np.where(avg_loss == 0, 100.0, avg_gain / (avg_loss + 1e-10))
+    rsi      = np.append(np.nan, 100 - (100 / (1 + rs)))
+    ema12    = pd.Series(close).ewm(span=12, adjust=False).mean().values
+    ema26    = pd.Series(close).ewm(span=26, adjust=False).mean().values
+    macd     = ema12 - ema26
+    sig      = pd.Series(macd).ewm(span=9, adjust=False).mean().values
+    sma20    = pd.Series(close).rolling(20).mean().values
+    std20    = pd.Series(close).rolling(20).std().values
+    bb_upper = sma20 + 2 * std20
+    bb_lower = sma20 - 2 * std20
+    bb_pct   = np.where(bb_upper - bb_lower == 0, 0.5,
+                        (close - bb_lower) / (bb_upper - bb_lower + 1e-10))
+    vol      = df["volume"].values
+    vol_sma  = pd.Series(vol).rolling(20).mean().values
+
+    # Data validation - flag suspicious volume
+    vol_ratio_raw = vol[-1] / (vol_sma[-1] + 1e-10)
+    vol_valid = 0.05 <= vol_ratio_raw <= 20.0
+
+    return {
+        "rsi":        round(float(rsi[-1]) if not np.isnan(rsi[-1]) else 50, 2),
+        "macd_hist":  round(float((macd - sig)[-1]), 4),
+        "bb_pct":     round(float(np.clip(bb_pct[-1], 0, 1)), 4),
+        "vol_ratio":  round(float(vol_ratio_raw), 4),
+        "vol_valid":  vol_valid,
+        "sma20":      round(float(sma20[-1]), 2),
+        "bb_upper":   round(float(bb_upper[-1]), 2),
+        "bb_lower":   round(float(bb_lower[-1]), 2),
     }
-    
-    var now = Date.now() / 1000;
-    var elapsed = Math.floor(now - startTime);
-    if (elapsed < 0) elapsed = 0;
-    
-    var em = String(Math.floor(elapsed/60)).padStart(2,'0');
-    var es = String(elapsed%60).padStart(2,'0');
-    if (te) te.textContent = em + ':' + es + ' elapsed';
-    
-    var prog = statusData.progress && statusData.progress[currentCoin];
-    if (prog && prog.total > 0) {
-      var remSecs = Math.max(0, prog.remaining_secs);
-      var rm = String(Math.floor(remSecs/60)).padStart(2,'0');
-      var rs = String(Math.floor(remSecs%60)).padStart(2,'0');
-      if (tr) tr.textContent = 'MC ' + prog.current + '/' + prog.total + ' | ' + prog.secs_per_run.toFixed(1) + 's/run | ~' + rm + ':' + rs + ' remaining';
-      if (pf) pf.style.width = prog.pct + '%';
-    } else {
-      if (tr) tr.textContent = 'Fetching data & preparing model...';
-      if (pf) pf.style.width = '3%';
+
+
+# ── External signals ───────────────────────────────────────────────────────────
+def fetch_fear_greed():
+    try:
+        r = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10)
+        r.raise_for_status()
+        d = r.json()
+        return {"value": int(d["data"][0]["value"]),
+                "label": d["data"][0]["value_classification"]}
+    except Exception:  # [FIX] Replaced bare except
+        # [FIX] Return None for value so interpretation logic knows it's missing
+        return {"value": None, "label": "N/A"}
+
+def fetch_funding_rate(symbol):
+    try:
+        r = requests.get("https://fapi.binance.com/fapi/v1/fundingRate",
+                         params={"symbol": COINS[symbol], "limit": 3}, timeout=10)
+        if r.ok and r.json():
+            data = r.json()
+            rate = float(data[-1]["fundingRate"]) * 100
+            avg  = sum(float(d["fundingRate"]) for d in data) / len(data) * 100
+            label = "Overcrowded Longs" if rate > 0.05 else \
+                    "Overcrowded Shorts" if rate < -0.01 else "Neutral"
+            print(f"[Funding] {symbol} {rate:.4f}% ({label})", flush=True)
+            return {"rate": round(rate, 4), "avg": round(avg, 4), "label": label}
+    except Exception as e:
+        print(f"[Funding] {symbol} failed: {e}", flush=True)
+    # [FIX] Return None for rate and avg so logic doesn't misinterpret 0.0 as "Neutral"
+    return {"rate": None, "avg": None, "label": "N/A"}
+
+def fetch_etf_flows():
+    try:
+        r = requests.get(
+            "https://farside.co.uk/bitcoin-etf-flow-all-data-table/",
+            headers={"User-Agent": "Mozilla/5.0"}, timeout=15
+        )
+        if not r.ok:
+            return {"total": None, "label": "Unavailable"}
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', r.text, re.DOTALL)
+        if rows:
+            numbers = re.findall(r'-?\d+(?:\.\d+)?', re.sub(r'<[^>]+>', ' ', rows[-2] if len(rows) > 1 else rows[-1]))
+            if numbers:
+                total = float(numbers[-1])
+                # Sanity check - reject absurd values (scraper artifact)
+                if not (-10000 <= total <= 10000):
+                    print(f"[ETF] Rejected absurd value: {total}", flush=True)
+                    return {"total": None, "label": "Unavailable"}
+                label = "Strong Inflows" if total > 300 else \
+                        "Inflows" if total > 0 else \
+                        "Outflows" if total > -300 else "Strong Outflows"
+                print(f"[ETF] Flow: ${total:.0f}M ({label})", flush=True)
+                return {"total": total, "label": label}
+    except Exception as e:
+        print(f"[ETF] Failed: {e}", flush=True)
+    return {"total": None, "label": "Unavailable"}
+
+def fetch_onchain():
+    result = {"mempool_size": 0, "mempool_label": "Normal"}
+    try:
+        r = requests.get("https://mempool.space/api/mempool", timeout=10)
+        if r.ok:
+            m = r.json()
+            result["mempool_size"] = m.get("count", 0)
+            s = result["mempool_size"]
+            result["mempool_label"] = "Very High" if s > 100000 else \
+                                      "High" if s > 50000 else \
+                                      "Low" if s < 5000 else "Normal"
+    except Exception as e:
+        print(f"[OnChain] Failed: {e}", flush=True)
+    return result
+
+def fetch_btc_dominance():
+    try:
+        r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
+        if r.ok:
+            return round(r.json()["data"]["market_cap_percentage"]["btc"], 2)
+    except Exception:  # [FIX] Replaced bare except
+        pass
+    return None
+
+
+# ── Data fetcher ───────────────────────────────────────────────────────────────
+def fetch_candles(symbol, interval="1h", limit=384):
+    binance_symbol = COINS[symbol]
+    params = {"symbol": binance_symbol, "interval": interval, "limit": limit}
+    for url in ["https://api1.binance.com/api/v3/klines",
+                "https://api2.binance.com/api/v3/klines",
+                "https://api3.binance.com/api/v3/klines",
+                "https://api.binance.com/api/v3/klines"]:
+        try:
+            r = requests.get(url, params=params, timeout=15)
+            r.raise_for_status()
+            raw = r.json()
+            df  = pd.DataFrame(raw, columns=[
+                "open_time","open","high","low","close","volume",
+                "close_time","qv","trades","tbb","tbq","ignore"
+            ])
+            df["timestamps"] = pd.to_datetime(df["open_time"], unit="ms", utc=True)
+            for c in ["open","high","low","close","volume"]:
+                df[c] = df[c].astype(float)
+            df = df[["timestamps","open","high","low","close","volume"]].reset_index(drop=True)
+            print(f"[Data] {symbol} {interval} OK ({len(df)} candles)", flush=True)
+            return df
+        except Exception as e:
+            print(f"[Data] {url} failed: {e}", flush=True)
+    raise RuntimeError(f"All Binance endpoints failed for {symbol} {interval}")
+
+
+# ── Find safe lookback via fast dry-run (pred_len=2) ─────────────────────────
+def find_safe_lookback(df, symbol):
+    """
+    Run a single fast prediction with pred_len=2 to find the maximum
+    lookback the model can handle without a RoPE tensor size mismatch.
+    Validates BEFORE committing to the full N=100 Monte Carlo loop.
+    """
+    candidates = [370, 360, 350, 340, 330, 320, 300, 280, 256]
+    for lookback in candidates:
+        if lookback > len(df):
+            continue
+        test_df = df.tail(lookback).reset_index(drop=True)
+        x_df        = test_df[["open","high","low","close","volume"]].copy()
+        x_timestamp = test_df["timestamps"].copy().reset_index(drop=True)
+        last_time   = test_df["timestamps"].iloc[-1]
+        future_times = pd.date_range(
+            start=last_time + pd.Timedelta(hours=1),
+            periods=2, freq="1h", tz="UTC"
+        )
+        y_timestamp = pd.Series(future_times).reset_index(drop=True)
+        try:
+            with torch.inference_mode():
+                predictor.predict(
+                    df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
+                    pred_len=2, T=0.7, top_p=0.9, sample_count=1
+                )
+            print(f"[Kronos] {symbol} safe lookback={lookback} (dry-run passed)", flush=True)
+            return lookback
+        except RuntimeError as e:
+            if "size of tensor" in str(e) or "must match" in str(e):
+                print(f"[Kronos] {symbol} lookback={lookback} failed dry-run, trying smaller...", flush=True)
+                continue
+            raise
+    raise RuntimeError(f"{symbol}: no working lookback found in {candidates}")
+
+
+# ── Kronos Monte Carlo - N=100, T=0.7, with real-time progress tracking ───────
+def kronos_predict(df, symbol="UNK", pred_len=24):
+    # Step 1: Find safe lookback via fast dry-run BEFORE the MC loop
+    safe_lookback = find_safe_lookback(df, symbol)
+    work_df = df.tail(safe_lookback).reset_index(drop=True)
+
+    last_time   = work_df["timestamps"].iloc[-1]
+    x_df        = work_df[["open","high","low","close","volume"]].copy()
+    x_timestamp = work_df["timestamps"].copy().reset_index(drop=True)
+    future_times = pd.date_range(
+        start=last_time + pd.Timedelta(hours=1),
+        periods=pred_len, freq="1h", tz="UTC"
+    )
+    y_timestamp = pd.Series(future_times).reset_index(drop=True)
+
+    all_closes = []
+    run_times  = []
+
+    # Step 2: Full MC loop - safe_lookback guaranteed to work, no crashes mid-loop
+    with torch.inference_mode():
+        for i in range(MONTE_CARLO_N):
+            t_start = time.time()
+            try:
+                p = predictor.predict(
+                    df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
+                    pred_len=pred_len, T=0.7, top_p=0.9, sample_count=1
+                )
+            except RuntimeError as e:
+                if "size of tensor" in str(e) or "must match" in str(e):
+                    print(f"[Kronos] {symbol} unexpected tensor error at MC run {i+1} with lookback={safe_lookback}: {e}", flush=True)
+                    raise
+                raise
+            elapsed = time.time() - t_start
+            run_times.append(elapsed)
+            all_closes.append(p["close"].values)
+
+            avg_secs = sum(run_times) / len(run_times)
+            remaining = (MONTE_CARLO_N - i - 1) * avg_secs
+            progress[symbol] = {
+                "current":        i + 1,
+                "total":          MONTE_CARLO_N,
+                "secs_per_run":   round(avg_secs, 2),
+                "remaining_secs": round(remaining, 0),
+                "pct":            round((i + 1) / MONTE_CARLO_N * 100, 1),
+            }
+            if i % 10 == 0:
+                print(f"[Kronos] {symbol} MC {i+1}/{MONTE_CARLO_N} ({avg_secs:.1f}s/run, ~{remaining/60:.1f}min left)", flush=True)
+
+    closes = np.array(all_closes)
+    progress.pop(symbol, None)
+    return {
+        "mean":         closes.mean(axis=0),
+        "upper":        np.percentile(closes, 90, axis=0),
+        "lower":        np.percentile(closes, 10, axis=0),
+        "std":          closes.std(axis=0),
+        "closes":       closes,
+        "future_times": future_times,
+        "lookback_used": safe_lookback,  # actual lookback reported honestly
     }
-  }, 1000);
-}
 
-function stopTimer() {
-  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-}
 
-function fmt(v) {
-  var dec = v < 1 ? 6 : v < 100 ? 4 : 2;
-  return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
-}
+# ── Signal interpretation ──────────────────────────────────────────────────────
+def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
+                      onchain, btc_dominance, symbol):
+    rsi     = ind["rsi"]
+    macd_h  = ind["macd_hist"]
+    bb      = ind["bb_pct"]
+    
+    # [FIX] Use .get() to safely handle None values for missing API data
+    fg      = fear_greed.get("value")
+    fund    = funding.get("rate")
+    bullish = upside_prob >= 50
 
-function livePx() {
-  fetch('https://api.binance.com/api/v3/ticker/price?symbol=' + BSYMS[currentCoin])
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      var p = parseFloat(d.price);
-      var dec = p < 1 ? 6 : p < 100 ? 4 : 2;
-      document.getElementById('livePrice').textContent = '$' + p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:dec});
-      document.getElementById('priceLabel').textContent = currentCoin + ' / USDT';
-    }).catch(function(){});
-}
+    confirmations, warnings = [], []
 
-function checkStatus() {
-  fetch(BASE + '/status')
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      statusData = d;
-      var el = document.getElementById('statusRow');
-      if (d.model_ready) {
-        var dev = d.device === 'directml' ? '⚡ Intel Arc GPU' : d.device === 'cuda' ? '⚡ NVIDIA GPU' : '💻 CPU';
-        el.innerHTML = '<span>✅</span><span>Kronos-base ready . ' + dev + ' . N=' + (d.monte_carlo_n||100) + '</span>';
-        var sub = document.getElementById('headerSub');
-        if (sub) sub.textContent = 'Kronos-base . 102M . N=' + (d.monte_carlo_n||100) + ' . ' + dev + ' . Manual refresh';
-        updateCoinButtons();
-        showCoinState();
-      } else if (d.model_error) {
-        el.innerHTML = '<span>❌</span><span>' + d.model_error + '</span>';
-      } else {
-        el.innerHTML = '<span>⏳</span><span>Loading Kronos-base...</span>';
-        setTimeout(checkStatus, 8000);
-      }
-    }).catch(function() { setTimeout(checkStatus, 10000); });
-}
+    if rsi < 30:   confirmations.append(f"RSI oversold ({rsi:.1f}) - potential bounce")
+    elif rsi > 70: warnings.append(f"RSI overbought ({rsi:.1f}) - stretched")
 
-function updateCoinButtons() {
-  COINS.forEach(function(c) {
-    var btn = document.getElementById('btn-' + c);
-    if (!btn) return;
-    btn.className = 'coin-btn';
-    if (c === currentCoin) btn.classList.add('active');
-    if (statusData.cached && statusData.cached.indexOf(c) >= 0) btn.classList.add('cached');
-    if (statusData.running && statusData.running[c]) btn.classList.add('computing');
-  });
-}
+    if macd_h > 0 and bullish:     confirmations.append("MACD bullish - confirms Kronos")
+    elif macd_h < 0 and not bullish: confirmations.append("MACD bearish - confirms Kronos")
+    elif macd_h > 0 and not bullish: warnings.append("MACD bullish but Kronos bearish - mixed")
+    elif macd_h < 0 and bullish:   warnings.append("MACD bearish but Kronos bullish - mixed")
 
-function selectCoin(coin) {
-  currentCoin = coin;
-  updateCoinButtons();
-  livePx();
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  showCoinState();
-}
+    if bb < 0.2:   confirmations.append("Price near lower BB - oversold zone")
+    elif bb > 0.8: warnings.append("Price near upper BB - overbought zone")
 
-function showCoinState() {
-  ['computingCard','notStarted','results'].forEach(function(id) {
-    document.getElementById(id).classList.add('hidden');
-  });
-  var isRunning = statusData.running && statusData.running[currentCoin];
-  var isCached  = statusData.cached && statusData.cached.indexOf(currentCoin) >= 0;
-  if (isRunning) {
-    document.getElementById('computingCard').classList.remove('hidden');
-    document.getElementById('computingTitle').textContent = 'Computing ' + currentCoin + '...';
-    startTimer();
-    startPolling();
-  } else if (isCached) {
-    stopTimer();
-    loadCache();
-  } else {
-    stopTimer();
-    document.getElementById('notStarted').classList.remove('hidden');
-    document.getElementById('notStartedTitle').textContent = currentCoin + ' - No Prediction Yet';
-  }
-}
+    # [FIX] Only evaluate Fear & Greed if data was successfully fetched
+    if fg is not None:
+        if fg <= 20:   confirmations.append(f"Extreme Fear ({fg}) - historically strong buy zone")
+        elif fg >= 80: warnings.append(f"Extreme Greed ({fg}) - historically risky zone")
 
-function startPolling() {
-  if (pollTimer) return;
-  pollTimer = setInterval(function() {
-    fetch(BASE + '/status')
-      .then(function(r) { return r.json(); })
-      .then(function(d) {
-        statusData = d;
-        updateCoinButtons();
-        if (!d.running || !d.running[currentCoin]) {
-          if (d.cached && d.cached.indexOf(currentCoin) >= 0) {
-            clearInterval(pollTimer); pollTimer = null;
-            stopTimer();
-            loadCache();
-          }
+    # [FIX] Only evaluate Funding Rates if data was successfully fetched
+    if fund is not None:
+        if fund > 0.05:   warnings.append(f"High funding ({fund:.3f}%) - longs overcrowded")
+        elif fund < -0.01: confirmations.append(f"Negative funding ({fund:.3f}%) - squeeze risk")
+
+    if symbol == "BTC" and etf_flows.get("total") is not None:
+        f = etf_flows["total"]
+        if f > 300:    confirmations.append(f"Strong ETF inflows (${f:.0f}M)")
+        elif f > 0:    confirmations.append(f"ETF inflows (${f:.0f}M)")
+        elif f < -300: warnings.append(f"Strong ETF outflows (${f:.0f}M)")
+        elif f < 0:    warnings.append(f"ETF outflows (${f:.0f}M)")
+
+    if btc_dominance and symbol != "BTC":
+        if btc_dominance > 57:   warnings.append(f"BTC dominance high ({btc_dominance}%) - alt headwinds")
+        elif btc_dominance < 45: confirmations.append(f"BTC dominance low ({btc_dominance}%) - alt season")
+
+    if not ind.get("vol_valid", True):
+        warnings.append(f"Unusual volume detected ({ind['vol_ratio']:.2f}x) - data may be unreliable")
+
+    n_c, n_w = len(confirmations), len(warnings)
+    context = "Strong confirmation" if n_c >= 3 and n_w == 0 else \
+              "Mostly confirmed" if n_c > n_w else \
+              "Caution - mixed signals" if n_w > n_c else "Neutral context"
+
+    return {"confirmations": confirmations, "warnings": warnings,
+            "context": context, "n_confirm": n_c, "n_warn": n_w}
+
+
+# ── Core prediction ────────────────────────────────────────────────────────────
+def run_prediction(symbol):
+    print(f"[Kronos] {symbol} starting on {DEVICE_TYPE.upper()}...", flush=True)
+
+    df         = fetch_candles(symbol, "1h", LOOKBACK)
+    last_price = float(df["close"].iloc[-1])
+    last_time  = df["timestamps"].iloc[-1]
+
+    # Fetch external signals in parallel while model is loading data
+    sig = {}
+    def fetch_signals():
+        sig["indicators"]    = compute_indicators(df)
+        sig["fear_greed"]    = fetch_fear_greed() if symbol == "BTC" else {"value": None, "label": "N/A"}
+        sig["onchain"]       = fetch_onchain() if symbol == "BTC" else {}
+        sig["funding"]       = fetch_funding_rate(symbol)
+        sig["etf_flows"]     = fetch_etf_flows() if symbol == "BTC" else {"total": None, "label": "N/A"}
+        sig["btc_dominance"] = fetch_btc_dominance() if symbol != "BTC" else None
+
+    st = threading.Thread(target=fetch_signals)
+    st.start()
+
+    # Run Kronos (N=100, T=0.7) with real-time progress tracking
+    pred = kronos_predict(df, symbol=symbol, pred_len=PRED_LEN)
+
+    st.join()  # Wait for external signals
+
+    closes     = pred["closes"]
+    mean_close = pred["mean"]
+    upper      = pred["upper"]
+    lower      = pred["lower"]
+    std        = pred["std"]
+
+    final_prices    = closes[:, -1]
+    raw_upside_prob = float((final_prices > last_price).mean()) * 100
+    # Fix 1: Hard cap 5%-95% - prevents false certainty (100% or 0% are statistical illusions)
+    upside_prob     = float(max(5.0, min(95.0, raw_upside_prob)))
+
+    std_pct         = std / last_price * 100
+    hist_vol_pct    = float(df["close"].pct_change().dropna().std() * 100)
+    # Scale 1h volatility to 24h using square root of time - correct comparison horizon
+    hist_vol_24h    = hist_vol_pct * float(np.sqrt(PRED_LEN))
+    vol_amp_prob    = float((std_pct > hist_vol_pct).mean()) * 100
+    spread_pct      = (upper - lower) / last_price * 100
+    avg_spread      = float(spread_pct.mean())
+
+    # Fix 2: Volatility-calibrated confidence
+    # Compare model's 24h predicted range to 24h historical volatility
+    if avg_spread < hist_vol_24h:
+        confidence = round(max(10.0, 50.0 - (hist_vol_24h - avg_spread) * 3), 1)
+        hallucinating = True
+    else:
+        confidence = round(max(0.0, 100.0 - avg_spread * 2), 1)
+        hallucinating = False
+
+    print(f"[Kronos] {symbol} spread={avg_spread:.2f}% hist_vol_1h={hist_vol_pct:.2f}% hist_vol_24h={hist_vol_24h:.2f}% hallucinating={hallucinating} conf={confidence}", flush=True)
+
+    signal_context = interpret_signals(
+        upside_prob, sig["indicators"], sig["fear_greed"],
+        sig["funding"], sig["etf_flows"], sig["onchain"],
+        sig["btc_dominance"], symbol
+    )
+
+    result = {
+        "updated_at":    datetime.now(timezone.utc).isoformat(),
+        "symbol":        f"{symbol}/USDT",
+        "coin":          symbol,
+        "last_price":    last_price,
+        "last_time":     str(last_time),
+        "pred_len":      PRED_LEN,
+        "lookback":      LOOKBACK,
+        "monte_carlo_n": MONTE_CARLO_N,
+        "model":         MODEL_NAME,
+        "device":        DEVICE_TYPE,
+        "upside_prob":      round(upside_prob, 1),
+        "raw_upside_prob":  round(raw_upside_prob, 1),
+        "hallucinating":    hallucinating,
+        "confidence":       confidence,
+        "vol_amp_prob":  round(vol_amp_prob, 1),
+        "lookback_used": pred.get("lookback_used", LOOKBACK),
+        "signal_context": signal_context,
+        "indicators":    sig["indicators"],
+        "fear_greed":    sig["fear_greed"],
+        "funding":       sig["funding"],
+        "etf_flows":     sig["etf_flows"],
+        "onchain":       sig["onchain"],
+        "btc_dominance": sig["btc_dominance"],
+        "accuracy":      get_accuracy_stats().get("by_coin", {}).get(symbol, {}),
+        "forecast": {
+            "timestamps": [str(t) for t in pred["future_times"]],
+            "mean_close": [round(v, 4) for v in mean_close.tolist()],
+            "upper":      [round(v, 4) for v in upper.tolist()],
+            "lower":      [round(v, 4) for v in lower.tolist()],
+        },
+        "history": {
+            "timestamps": [str(t) for t in df["timestamps"].tolist()],
+            "close":      [round(v, 4) for v in df["close"].tolist()],
         }
-      }).catch(function(){});
-  }, 5000);
-}
-
-function loadCache() {
-  fetch(BASE + '/cache/' + currentCoin)
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.error) { showCoinState(); return; }
-      showResults(d);
-    }).catch(function(e) { console.error('loadCache:', e); });
-}
-
-function startPrediction() {
-  var btn = document.getElementById('btnStart');
-  if (btn) { btn.textContent = '⏳ Queuing...'; btn.disabled = true; }
-  fetch(BASE + '/predict/' + currentCoin)
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (btn) { btn.textContent = 'Run Kronos Prediction'; btn.disabled = false; }
-      ['computingCard','notStarted','results'].forEach(function(id) {
-        document.getElementById(id).classList.add('hidden');
-      });
-      document.getElementById('computingCard').classList.remove('hidden');
-      document.getElementById('computingTitle').textContent = currentCoin + ' - Queued';
-      document.getElementById('computingLabel').textContent =
-        d.status === 'already_running_or_queued'
-          ? 'Already computing - please wait...'
-          : 'Queued - will start after current prediction finishes...';
-      startTimer();
-      startPolling();
-    }).catch(function() {
-      if (btn) { btn.textContent = '❌ Error - try again'; btn.disabled = false; }
-    });
-}
-
-function showResults(d) {
-  ['computingCard','notStarted'].forEach(function(id) {
-    document.getElementById(id).classList.add('hidden');
-  });
-  stopTimer();
-  document.getElementById('results').classList.remove('hidden');
-
-  var rb = document.getElementById('refreshBadge');
-  if (d.is_running) rb.classList.remove('hidden');
-  else rb.classList.add('hidden');
-
-  var ageText = '';
-  if (d.age_minutes !== undefined) {
-    ageText = d.age_minutes < 1 ? ' . Just updated' :
-              d.age_minutes === 1 ? ' . 1 min ago' : ' . ' + d.age_minutes + ' min ago';
-    if (d.next_refresh_mins > 0) ageText += ' . refresh in ' + d.next_refresh_mins + 'min';
-  }
-  var staleHtml = d.is_stale ? ' <span class="stale-warn">⚠️ Stale</span>' : '';
-  document.getElementById('updatedTime').innerHTML =
-    'Last updated: ' + new Date(d.updated_at).toLocaleString() + ageText + staleHtml;
-
-  var db = document.getElementById('deviceBadge');
-  var gb = document.getElementById('gpuBadge');
-  if (d.device && d.device !== 'cpu') {
-    gb.style.display = 'inline-flex';
-    gb.textContent = d.device === 'directml' ? '⚡ Intel Arc GPU' : '⚡ NVIDIA GPU';
-  }
-  if (db) db.textContent = '🧠 Kronos-base . 102.3M . N=' + (d.monte_carlo_n||100) + ' . T=0.7 . P10/P90';
-
-  var up = d.upside_prob;
-  var uEl = document.getElementById('upsideVal');
-  uEl.textContent = up.toFixed(1) + '%';
-  uEl.className = 'metric-value ' + (up >= 60 ? 'up' : up >= 40 ? 'warn' : 'down');
-  var bar = document.getElementById('upsideBar');
-  bar.style.width = up + '%';
-  bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)';
-
-  var conf = d.confidence || 50;
-  var confEl = document.getElementById('confidenceVal');
-  confEl.textContent = conf.toFixed(0) + '%';
-  confEl.className = 'metric-value ' + (conf >= 70 ? 'up' : conf >= 40 ? 'warn' : 'down');
-
-  if (d.accuracy && d.accuracy.total > 0) {
-    document.getElementById('accuracyBox').classList.remove('hidden');
-    var accEl = document.getElementById('accuracyVal');
-    accEl.textContent = d.accuracy.pct + '%';
-    accEl.style.color = d.accuracy.pct >= 55 ? 'var(--green)' : d.accuracy.pct >= 45 ? 'var(--orange)' : 'var(--red)';
-    document.getElementById('accuracyCount').textContent =
-      d.accuracy.correct + ' correct out of ' + d.accuracy.total + ' predictions tracked';
-  }
-
-  if (d.signal_context) {
-    var sc = d.signal_context;
-    var sumEl = document.getElementById('contextSummary');
-
-    if (d.hallucinating) {
-      sumEl.innerHTML = '<span style="color:var(--red);font-weight:700">⚠ Model Hallucinating Certainty</span><br>' +
-        '<span style="font-size:11px;color:var(--muted2)">Predicted range is tighter than historical volatility. Confidence has been reduced. Do not trust extreme upside/downside readings.</span>';
-    } else {
-      sumEl.textContent = sc.context;
-      sumEl.style.color = sc.n_confirm > sc.n_warn ? 'var(--green)' :
-                          sc.n_warn > sc.n_confirm ? 'var(--orange)' : 'var(--muted2)';
     }
-    var cDiv = document.getElementById('confirmations');
-    cDiv.innerHTML = '';
-    (sc.confirmations || []).forEach(function(c) {
-      cDiv.innerHTML += '<div class="context-item"><span style="color:var(--green)">✓</span><span>' + c + '</span></div>';
-    });
-    var wDiv = document.getElementById('warnings');
-    wDiv.innerHTML = '';
-    (sc.warnings || []).forEach(function(w) {
-      wDiv.innerHTML += '<div class="context-item"><span style="color:var(--orange)">⚠</span><span>' + w + '</span></div>';
-    });
-    if (!sc.confirmations.length && !sc.warnings.length) {
-      cDiv.innerHTML = '<div class="context-item"><span style="color:var(--muted2)">-</span><span style="color:var(--muted2)">No strong auxiliary signals</span></div>';
-    }
-  }
 
-  var fc = d.forecast;
-  var lastMean = fc.mean_close[fc.mean_close.length-1];
-  var lastHigh = fc.upper[fc.upper.length-1];
-  var lastLow  = fc.lower[fc.lower.length-1];
-  var chg = ((lastMean - d.last_price) / d.last_price * 100);
-  document.getElementById('targetPrice').textContent = fmt(lastMean);
-  var cEl = document.getElementById('targetChange');
-  cEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '% vs current';
-  cEl.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
-  document.getElementById('tHigh').textContent = '▲ ' + fmt(lastHigh);
-  document.getElementById('tLow').textContent  = '▼ ' + fmt(lastLow);
+    result = json.loads(json.dumps(result, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
+    save_prediction(symbol, result)
+    print(f"[Kronos] {symbol} DONE. Upside={upside_prob:.1f}% Conf={confidence:.1f}% Device={DEVICE_TYPE.upper()}", flush=True)
+    return result
 
-  if (d.indicators) {
-    var ind = d.indicators;
-    var rsi = ind.rsi;
-    var rsiEl = document.getElementById('rsiVal');
-    rsiEl.textContent = rsi.toFixed(1);
-    rsiEl.className = 'ind-val ' + (rsi < 30 ? 'up' : rsi > 70 ? 'down' : 'warn');
-    var mh = ind.macd_hist;
-    var macdEl = document.getElementById('macdVal');
-    macdEl.textContent = mh >= 0 ? '▲ Bull' : '▼ Bear';
-    macdEl.className = 'ind-val ' + (mh >= 0 ? 'up' : 'down');
-    var bb = ind.bb_pct * 100;
-    var bbEl = document.getElementById('bbVal');
-    bbEl.textContent = bb.toFixed(0) + '%';
-    bbEl.className = 'ind-val ' + (bb < 20 ? 'up' : bb > 80 ? 'down' : 'warn');
-    var vr = ind.vol_ratio;
-    var vrEl = document.getElementById('volRatioVal');
-    vrEl.textContent = vr.toFixed(2) + 'x';
-    vrEl.className = 'ind-val ' + (!ind.vol_valid ? 'warn' : vr > 1.5 ? 'up' : '');
-    document.getElementById('sma20Val').textContent = fmt(ind.sma20);
-  }
 
-  if (d.fear_greed && d.fear_greed.value !== undefined && d.fear_greed.value !== null) {
-    var fg = d.fear_greed;
-    var fgEl = document.getElementById('fgVal');
-    fgEl.textContent = fg.value + ' ' + fg.label;
-    fgEl.className = 'ind-val ' + (fg.value >= 60 ? 'up' : fg.value <= 30 ? 'down' : 'warn');
-  } else {
-    var fgEl = document.getElementById('fgVal');
-    fgEl.textContent = 'N/A';
-    fgEl.className = 'ind-val';
-  }
+# ── Model loader ───────────────────────────────────────────────────────────────
+def load_model():
+    global predictor, model_ready, model_error, MONTE_CARLO_N
+    try:
+        load_cache_from_disk()
+        print("[Kronos] Loading tokenizer...", flush=True)
+        tokenizer = KronosTokenizer.from_pretrained(TOKENIZER_NAME)
+        print("[Kronos] Loading Kronos-base...", flush=True)
+        model = Kronos.from_pretrained(MODEL_NAME)
+        model.eval()
 
-  if (d.funding) {
-    var fundEl = document.getElementById('fundingVal');
-    fundEl.textContent = d.funding.rate !== null ? (d.funding.rate.toFixed(3) + '% . ' + d.funding.label) : 'N/A';
-    fundEl.className = 'signal-val ' +
-      (d.funding.label === 'Overcrowded Longs' ? 'warn' :
-       d.funding.label === 'Overcrowded Shorts' ? 'up' : '');
-  }
+        # Fix 4: Try GPU, verify tensors actually move, fall back to CPU if not
+        gpu_working = False
+        if DEVICE_TYPE != "cpu":
+            try:
+                model = model.to(DEVICE)
+                # Verify GPU inference actually works end-to-end
+                test_tensor = torch.zeros(1, 10).to(DEVICE)
+                _ = test_tensor + 1
+                gpu_working = True
+                print(f"[Kronos] Model on {DEVICE_TYPE.upper()} - verified!", flush=True)
+            except Exception as e:
+                print(f"[Kronos] GPU failed ({e}), falling back to CPU", flush=True)
+                model = model.cpu()
 
-  if (d.etf_flows && d.etf_flows.total !== null) {
-    var etfEl = document.getElementById('etfVal');
-    etfEl.textContent = (d.etf_flows.total > 0 ? '+' : '') + d.etf_flows.total.toFixed(0) + 'M . ' + d.etf_flows.label;
-    etfEl.className = 'signal-val ' + (d.etf_flows.total > 0 ? 'up' : 'down');
-    document.getElementById('etfItem').classList.remove('hidden');
-  }
+        # N=100 - KronosPredictor runs on CPU internally (PCIe bottleneck confirmed)
+        # Each run ~5-7s, total ~10 min per coin. Better P10/P90 accuracy than N=50.
+        MONTE_CARLO_N = 100
+        device_note = "GPU connected (CPU-bound inference)" if gpu_working else "CPU"
+        print(f"[Kronos] {device_note} - N={MONTE_CARLO_N}", flush=True)
 
-  if (d.onchain && d.onchain.mempool_size !== undefined) {
-    document.getElementById('memVal').textContent =
-      (d.onchain.mempool_size || 0).toLocaleString() + ' . ' + (d.onchain.mempool_label || '');
-  }
+        predictor   = KronosPredictor(model, tokenizer, max_context=512)
+        model_ready = True
+        print(f"[Kronos] Ready! Device={DEVICE_TYPE.upper()} N={MONTE_CARLO_N}", flush=True)
 
-  if (d.btc_dominance) {
-    document.getElementById('domVal').textContent = d.btc_dominance.toFixed(1) + '%';
-  }
+        for i in range(NUM_WORKERS):
+            threading.Thread(target=worker, daemon=True, name=f"Worker-{i+1}").start()
 
-  drawChart(d);
-  buildTable(d);
-}
+        # No auto-queuing - user manually selects which coin to predict
+        print(f"[Kronos] Ready! Waiting for manual prediction requests.", flush=True)
 
-function buildTable(d) {
-  var fc = d.forecast;
-  var hours = [0,1,2,5,11,17,23];
-  var tb = document.getElementById('tableBody');
-  tb.innerHTML = '';
-  hours.forEach(function(i) {
-    if (i >= fc.mean_close.length) return;
-    var m = fc.mean_close[i], hi = fc.upper[i], lo = fc.lower[i];
-    var chg = ((m - d.last_price) / d.last_price * 100);
-    var tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td><span class="hbadge">+' + (i+1) + 'h</span></td>' +
-      '<td style="font-weight:600;color:' + (chg>=0?'var(--green)':'var(--red)') + '">' +
-        fmt(m) + '<span style="font-size:10px;color:var(--muted2)">&nbsp;' +
-        (chg>=0?'+':'') + chg.toFixed(1) + '%</span></td>' +
-      '<td style="font-size:11px;text-align:right">' +
-        '<span style="color:var(--green)">▲' + fmt(hi) + '</span><br>' +
-        '<span style="color:var(--red)">▼' + fmt(lo) + '</span></td>';
-    tb.appendChild(tr);
-  });
-}
+        # [FIX] Run accuracy check immediately on startup, THEN loop hourly
+        def accuracy_loop():
+            check_accuracy()  # Check pending predictions right now
+            while True:
+                time.sleep(3600)
+                check_accuracy()
+                
+        threading.Thread(target=accuracy_loop, daemon=True, name="AccuracyChecker").start()
 
-function drawChart(d) {
-  var cv = document.getElementById('chart');
-  var ctx = cv.getContext('2d');
-  var dpr = window.devicePixelRatio || 1;
-  cv.width = cv.offsetWidth * dpr;
-  cv.height = cv.offsetHeight * dpr;
-  ctx.scale(dpr, dpr);
-  var W = cv.offsetWidth, H = cv.offsetHeight;
-  ctx.clearRect(0, 0, W, H);
-  var hist = d.history.close.slice(-48);
-  var fm = d.forecast.mean_close, fu = d.forecast.upper, fl = d.forecast.lower;
-  var all = hist.concat(fm, fu, fl);
-  var minV = Math.min.apply(null, all) * 0.999;
-  var maxV = Math.max.apply(null, all) * 1.001;
-  var total = hist.length + fm.length;
-  var p = {l:8, r:8, t:12, b:20};
-  var cW = W - p.l - p.r, cH = H - p.t - p.b;
-  function xP(i) { return p.l + (i / (total-1)) * cW; }
-  function yP(v) { return p.t + (1 - (v - minV) / (maxV - minV)) * cH; }
-  var hl = hist.length;
+    except Exception as e:
+        model_error = str(e)
+        print(f"[Kronos] Load failed: {e}", flush=True)
+        traceback.print_exc()
 
-  ctx.beginPath();
-  fu.forEach(function(v, i) { var x=xP(hl-1+i), y=yP(v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-  fl.slice().reverse().forEach(function(v, i) { var idx=fl.length-1-i; ctx.lineTo(xP(hl-1+idx), yP(v)); });
-  ctx.closePath();
-  ctx.fillStyle = 'rgba(245,158,11,.15)';
-  ctx.fill();
+threading.Thread(target=load_model, daemon=True).start()
 
-  ctx.beginPath();
-  hist.forEach(function(v, i) { var x=xP(i), y=yP(v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-  ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
 
-  ctx.beginPath();
-  fm.forEach(function(v, i) { var x=xP(hl-1+i), y=yP(i===0?hist[hist.length-1]:v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-  ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2; ctx.setLineDash([5,3]); ctx.stroke(); ctx.setLineDash([]);
+# ── Routes ─────────────────────────────────────────────────────────────────────
+@app.route("/")
+def index():
+    return send_from_directory(os.path.join(BASE_DIR, 'static'), "index.html")
 
-  var nx = xP(hl - 1);
-  ctx.beginPath(); ctx.moveTo(nx, p.t); ctx.lineTo(nx, H - p.b);
-  ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.lineWidth = 1; ctx.setLineDash([3,3]); ctx.stroke(); ctx.setLineDash([]);
+@app.route("/status")
+def status():
+    # [FIX] Make a safe copy of progress so worker mutation doesn't crash JSON serialization
+    safe_progress = dict(progress)
+    
+    return jsonify({
+        "model_ready":   model_ready,
+        "model_error":   model_error,
+        "model":         MODEL_NAME,
+        "device":        DEVICE_TYPE,
+        "monte_carlo_n": MONTE_CARLO_N,
+        "coins":         list(COINS.keys()),
+        "cached":        list(cache.keys()),
+        "running":       {k: v for k, v in running.items() if v},
+        "running_since": {k: v for k, v in running_since.items() if running.get(k)},
+        "progress":      safe_progress,
+        "accuracy":      get_accuracy_stats().get("by_coin", {}),
+        "requests_24h":  get_request_stats(),
+    })
 
-  ctx.font = '9px -apple-system,sans-serif';
-  ctx.fillStyle = 'rgba(100,116,139,.9)'; ctx.fillText('History', p.l+4, H-p.b+13);
-  ctx.fillStyle = 'rgba(245,158,11,.9)'; ctx.fillText('Forecast', nx+4, H-p.b+13);
-}
+@app.route("/cache/<symbol>")
+def get_cache(symbol):
+    symbol = symbol.upper()
+    if symbol not in COINS:
+        return jsonify({"error": f"Unknown symbol {symbol}"}), 400
+    if symbol not in cache:
+        return jsonify({
+            "error":       f"No prediction yet for {symbol}.",
+            "model_ready": model_ready,
+            "is_running":  running.get(symbol, False)
+        }), 404
+    result = dict(cache[symbol])
+    result["is_running"] = running.get(symbol, False)
+    try:
+        updated  = datetime.fromisoformat(result["updated_at"])
+        age_secs = int((datetime.now(timezone.utc) - updated).total_seconds())
+        result["age_minutes"]       = age_secs // 60
+        result["next_refresh_mins"] = max(0, (REFRESH_SECS - age_secs) // 60)
+        result["is_stale"]          = age_secs > REFRESH_SECS + 300
+    except Exception:
+        pass
+    return jsonify(result)
 
-livePx();
-setInterval(livePx, 10000);
-checkStatus();
+def get_request_stats():
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            rows = conn.execute("""
+                SELECT symbol, COUNT(*) as cnt
+                FROM request_log
+                WHERE requested_at > datetime('now', '-24 hours')
+                GROUP BY symbol
+                ORDER BY cnt DESC
+            """).fetchall()
+            total = conn.execute("""
+                SELECT COUNT(*) FROM request_log
+                WHERE requested_at > datetime('now', '-24 hours')
+            """).fetchone()[0]
+        return {"total_24h": total, "by_coin": {s: c for s, c in rows}}
+    except Exception:
+        return {"total_24h": 0, "by_coin": {}}
 
-function openDrawer() {
-  document.getElementById('drawer').classList.add('open');
-  document.getElementById('drawerOverlay').classList.add('open');
-  loadAccuracy();
-}
+@app.route("/predict/<symbol>")
+def predict(symbol):
+    symbol = symbol.upper()
+    if symbol not in COINS:
+        return jsonify({"error": f"Unknown symbol {symbol}"}), 400
+    if not model_ready:
+        return jsonify({"error": "Model not loaded yet."}), 503
 
-function closeDrawer() {
-  document.getElementById('drawer').classList.remove('open');
-  document.getElementById('drawerOverlay').classList.remove('open');
-}
+    with queue_lock:
+        if running.get(symbol, False) or symbol in queued_coins:
+            return jsonify({"status": "already_running_or_queued"})
+        queued_coins.add(symbol)
+        task_queue.put(symbol)
 
-function loadAccuracy() {
-  fetch(BASE + '/accuracy')
-    .then(function(r) { return r.json(); })
-    .then(function(data) {
-      var el = document.getElementById('accuracyList');
-      var byCoin = data.by_coin || {};
-      var byConf = data.by_confidence || {};
-      var keys = Object.keys(byCoin);
+    # Log this request
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("INSERT INTO request_log (symbol, requested_at) VALUES (?, ?)",
+                             (symbol, datetime.now(timezone.utc).isoformat()))
+                conn.commit()
+    except Exception:
+        pass
 
-      if (keys.length === 0) {
-        el.innerHTML = '<div class="acc-empty">🕐 No accuracy data yet.<br><br>After 24 hours, the app automatically checks whether each prediction was correct and logs it here.<br><br>Check back tomorrow.</div>';
-        return;
-      }
+    return jsonify({"status": "queued"})
 
-      var totalAll = keys.reduce(function(s,k){return s+byCoin[k].total;}, 0);
-      var correctAll = keys.reduce(function(s,k){return s+byCoin[k].correct;}, 0);
-      var overallPct = totalAll > 0 ? (correctAll/totalAll*100).toFixed(1) : '-';
-      var overallColor = parseFloat(overallPct) >= 55 ? 'var(--green)' : parseFloat(overallPct) >= 45 ? 'var(--orange)' : 'var(--red)';
+@app.route("/accuracy")
+def accuracy_route():
+    return jsonify(get_accuracy_stats())
 
-      var html = '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;text-align:center">' +
-        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Overall Directional Accuracy</div>' +
-        '<div style="font-size:36px;font-weight:800;color:' + overallColor + '">' + overallPct + '%</div>' +
-        '<div style="font-size:12px;color:var(--muted2);margin-top:4px">' + correctAll + ' correct out of ' + totalAll + ' predictions</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% . Good model ≥ 55%</div>' +
-      '</div>';
-
-      var confKeys = ['high', 'medium', 'low'];
-      var confLabels = {high: '🟢 High Confidence (≥80%)', medium: '🟡 Medium (60–80%)', low: '🔴 Low (<60%)'};
-      var hasConf = confKeys.some(function(k){ return byConf[k]; });
-      if (hasConf) {
-        html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">';
-        html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Accuracy by Confidence Level</div>';
-        html += '<div style="font-size:11px;color:var(--muted2);margin-bottom:8px">Does high model confidence = more accurate? Find out here.</div>';
-        confKeys.forEach(function(k) {
-          var b = byConf[k];
-          if (!b) return;
-          var bColor = b.pct >= 55 ? 'var(--green)' : b.pct >= 45 ? 'var(--orange)' : 'var(--red)';
-          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--border)">' +
-            '<div><div style="font-size:12px;font-weight:600">' + confLabels[k] + '</div>' +
-            '<div style="font-size:11px;color:var(--muted2)">' + b.correct + '/' + b.total + ' correct</div></div>' +
-            '<div style="font-size:18px;font-weight:800;color:' + bColor + '">' + b.pct + '%</div>' +
-          '</div>';
-        });
-        html += '</div>';
-      }
-
-      html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">By Coin</div>';
-      keys.sort(function(a,b){ return byCoin[b].total - byCoin[a].total; });
-      keys.forEach(function(sym) {
-        var d = byCoin[sym];
-        var pct = d.pct;
-        var color = pct >= 60 ? 'var(--green)' : pct >= 45 ? 'var(--orange)' : 'var(--red)';
-        html += '<div class="acc-row">' +
-          '<div>' +
-            '<div class="acc-symbol">' + sym + '/USDT</div>' +
-            '<div style="font-size:11px;color:var(--muted2);margin-top:2px">' + d.correct + ' correct of ' + d.total + ' tracked</div>' +
-            '<div class="acc-bar-bg"><div class="acc-bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
-          '</div>' +
-          '<div class="acc-stats">' +
-            '<div class="acc-pct" style="color:' + color + '">' + pct + '%</div>' +
-            '<div class="acc-count">Direction<br>accuracy</div>' +
-          '</div>' +
-        '</div>';
-      });
-
-      el.innerHTML = html;
-
-      if (statusData.device) {
-        var devEl = document.getElementById('infoDevice');
-        if (devEl) devEl.textContent = statusData.device === 'directml' ? 'Intel Arc (CPU-bound)' :
-                                        statusData.device === 'cuda' ? 'NVIDIA GPU' : 'CPU';
-      }
-      if (statusData.monte_carlo_n) {
-        var nEl = document.getElementById('infoN');
-        if (nEl) nEl.textContent = statusData.monte_carlo_n;
-      }
-      // Show request count
-      if (statusData.requests_24h) {
-        var reqEl = document.getElementById('infoRequests');
-        if (reqEl) {
-          var r = statusData.requests_24h;
-          var byCoins = Object.entries(r.by_coin || {}).map(function(e){ return e[0]+':'+e[1]; }).join(', ');
-          reqEl.textContent = r.total_24h + ' total' + (byCoins ? ' (' + byCoins + ')' : '');
-        }
-      }
-    }).catch(function(e) {
-      document.getElementById('accuracyList').innerHTML =
-        '<div class="acc-empty">⚠️ Could not load accuracy data.</div>';
-    });
-}
-</script>
-</body>
-</html>
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)

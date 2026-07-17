@@ -1,8 +1,3 @@
-Here is the complete, final `app.py`. 
-
-I have taken the exact, structurally sound version we confirmed earlier and applied **only** the one-line volatility fix to it. Nothing else has been touched, added, or removed.
-
-```python
 import os, sys, time, threading, traceback, json, queue, sqlite3, re
 from datetime import datetime, timezone
 import numpy as np
@@ -737,4 +732,3 @@ def accuracy_route():
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
     app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
-```

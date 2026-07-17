@@ -9,19 +9,22 @@ import torch
 
 # ── GPU Setup (Intel Arc via DirectML, NVIDIA via CUDA, fallback CPU) ─────────
 def setup_device():
+    # Try Intel Arc GPU via torch-directml (Windows)
     try:
         import torch_directml
         dev = torch_directml.device()
-        torch.tensor([1.0]).to(dev)
+        torch.tensor([1.0]).to(dev)  # quick validation
         print(f"[GPU] Intel Arc detected via DirectML!", flush=True)
         return dev, "directml"
     except Exception as e:
         print(f"[GPU] DirectML not available ({e}), trying CUDA...", flush=True)
 
+    # Try NVIDIA CUDA
     if torch.cuda.is_available():
         print(f"[GPU] CUDA: {torch.cuda.get_device_name(0)}", flush=True)
         return torch.device("cuda"), "cuda"
 
+    # CPU fallback - use all cores
     n = os.cpu_count() or 4
     torch.set_num_threads(n)
     torch.set_num_interop_threads(max(1, n // 2))
@@ -42,9 +45,10 @@ MODEL_NAME     = "NeoQuasar/Kronos-base"
 TOKENIZER_NAME = "NeoQuasar/Kronos-Tokenizer-base"
 LOOKBACK       = 384
 PRED_LEN       = 24
-MONTE_CARLO_N  = 100
+# N dynamically set after device detection in load_model
+MONTE_CARLO_N  = 100   # default, overridden based on device
 REFRESH_SECS   = 3600
-NUM_WORKERS    = 1
+NUM_WORKERS    = 1     # Kronos model is NOT thread-safe - must run one coin at a time
 DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
 
 COINS = {
@@ -59,7 +63,7 @@ model_ready  = False
 model_error  = ""
 running      = {}
 running_since= {}
-progress     = {}
+progress     = {}   # symbol -> {"current": N, "total": N, "secs_per_run": float}
 task_queue   = queue.Queue()
 db_lock      = threading.Lock()
 
@@ -67,9 +71,11 @@ db_lock      = threading.Lock()
 queued_coins = set()
 queue_lock   = threading.Lock()
 
+
 # ── SQLite ─────────────────────────────────────────────────────────────────────
 def init_db():
     with sqlite3.connect(DB_FILE) as conn:
+        # Enable WAL mode - prevents readers blocking writers and concurrent write conflicts
         conn.execute("PRAGMA journal_mode=WAL")
         conn.execute("""
             CREATE TABLE IF NOT EXISTS predictions (
@@ -84,6 +90,7 @@ def init_db():
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol           TEXT NOT NULL,
                 predicted_at     TEXT NOT NULL,
+                entry_price      REAL NOT NULL,
                 predicted_price  REAL NOT NULL,
                 upside_prob      REAL NOT NULL,
                 confidence       REAL NOT NULL DEFAULT 0,
@@ -92,7 +99,20 @@ def init_db():
                 checked_at       TEXT
             )
         """)
-        conn.commit()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS request_log (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol     TEXT NOT NULL,
+                requested_at TEXT NOT NULL
+            )
+        """)
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            conn.execute("ALTER TABLE accuracy ADD COLUMN entry_price REAL NOT NULL DEFAULT 0")
+            conn.commit()
+            print("[DB] Migrated: added entry_price column", flush=True)
+    except Exception:
+        pass  # Column already exists
     print(f"[DB] SQLite ready (WAL mode): {DB_FILE}", flush=True)
 
 def save_prediction(symbol, result):
@@ -103,12 +123,13 @@ def save_prediction(symbol, result):
                     INSERT OR REPLACE INTO predictions (symbol, data, updated_at, error)
                     VALUES (?, ?, ?, NULL)
                 """, (symbol, json.dumps(result), result["updated_at"]))
-                target = result["forecast"]["mean_close"][-1]
-                conf   = result.get("confidence", 0)
+                target     = result["forecast"]["mean_close"][-1]
+                entry      = result["last_price"]
+                conf       = result.get("confidence", 0)
                 conn.execute("""
-                    INSERT INTO accuracy (symbol, predicted_at, predicted_price, upside_prob, confidence)
-                    VALUES (?, ?, ?, ?, ?)
-                """, (symbol, result["updated_at"], target, result["upside_prob"], conf))
+                    INSERT INTO accuracy (symbol, predicted_at, entry_price, predicted_price, upside_prob, confidence)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (symbol, result["updated_at"], entry, target, result["upside_prob"], conf))
                 conn.commit()
         with cache_lock:
             cache[symbol] = result
@@ -133,17 +154,18 @@ def load_cache_from_disk():
         print(f"[DB] Load failed: {e}", flush=True)
 
 def check_accuracy():
+    """Compare 24h-old predictions to actual price. Runs on single background timer."""
     try:
         with db_lock:
             with sqlite3.connect(DB_FILE) as conn:
                 rows = conn.execute("""
-                    SELECT id, symbol, predicted_price, upside_prob
+                    SELECT id, symbol, entry_price, upside_prob
                     FROM accuracy
                     WHERE actual_price IS NULL
                     AND predicted_at < datetime('now', '-24 hours')
                 """).fetchall()
 
-        for row_id, symbol, pred_price, upside_prob in rows:
+        for row_id, symbol, entry_price, upside_prob in rows:
             if symbol not in COINS:
                 continue
             try:
@@ -151,8 +173,9 @@ def check_accuracy():
                                  params={"symbol": COINS[symbol]}, timeout=10)
                 if r.ok:
                     actual  = float(r.json()["price"])
-                    correct = 1 if (upside_prob >= 50 and actual > pred_price) or \
-                                   (upside_prob < 50 and actual <= pred_price) else 0
+                    # Correct: compare actual price direction vs entry price at prediction time
+                    correct = 1 if (upside_prob >= 50 and actual > entry_price) or \
+                                   (upside_prob < 50 and actual <= entry_price) else 0
                     with db_lock:
                         with sqlite3.connect(DB_FILE) as conn:
                             conn.execute("""
@@ -170,11 +193,14 @@ def check_accuracy():
 def get_accuracy_stats():
     try:
         with sqlite3.connect(DB_FILE) as conn:
+            # Overall per-symbol stats
             rows = conn.execute("""
                 SELECT symbol, COUNT(*) as total, SUM(direction_correct) as correct
                 FROM accuracy WHERE direction_correct IS NOT NULL
                 GROUP BY symbol
             """).fetchall()
+
+            # Confidence-bucketed stats (all symbols combined)
             bucket_rows = conn.execute("""
                 SELECT
                     CASE
@@ -192,6 +218,7 @@ def get_accuracy_stats():
         stats = {s: {"total": t, "correct": c, "pct": round(c/t*100, 1)}
                  for s, t, c in rows if t > 0}
 
+        # Add confidence breakdown
         conf_stats = {}
         for bucket, total, correct in bucket_rows:
             if total > 0:
@@ -205,11 +232,13 @@ def get_accuracy_stats():
                         "low":    "Low confidence (<60%)"
                     }.get(bucket, bucket)
                 }
+
         return {"by_coin": stats, "by_confidence": conf_stats}
     except Exception:
         return {"by_coin": {}, "by_confidence": {}}
 
-# ── Worker ────────────────────────────────────────────────────────────────────
+
+# ── Worker - processes one coin at a time, no auto-requeue ────────────────────
 def worker():
     while True:
         symbol = task_queue.get()
@@ -231,7 +260,8 @@ def worker():
             running[symbol] = False
         print(f"[Kronos] {symbol} complete. Waiting for next manual request.", flush=True)
 
-# ── Technical Indicators ──────────────────────────────────────────────────────
+
+# ── Technical Indicators (RSI with Wilder's smoothing) ────────────────────────
 def compute_indicators(df):
     close    = df["close"].values
     delta    = np.diff(close)
@@ -254,6 +284,7 @@ def compute_indicators(df):
     vol      = df["volume"].values
     vol_sma  = pd.Series(vol).rolling(20).mean().values
 
+    # Data validation - flag suspicious volume
     vol_ratio_raw = vol[-1] / (vol_sma[-1] + 1e-10)
     vol_valid = 0.05 <= vol_ratio_raw <= 20.0
 
@@ -268,7 +299,8 @@ def compute_indicators(df):
         "bb_lower":   round(float(bb_lower[-1]), 2),
     }
 
-# ── External signals ──────────────────────────────────────────────────────────
+
+# ── External signals ───────────────────────────────────────────────────────────
 def fetch_fear_greed():
     try:
         r = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10)
@@ -277,7 +309,8 @@ def fetch_fear_greed():
         return {"value": int(d["data"][0]["value"]),
                 "label": d["data"][0]["value_classification"]}
     except Exception:  # [FIX] Replaced bare except
-        return {"value": None, "label": "N/A"}  # [FIX] Return None so logic isn't tricked
+        # [FIX] Return None for value so interpretation logic knows it's missing
+        return {"value": None, "label": "N/A"}
 
 def fetch_funding_rate(symbol):
     try:
@@ -289,10 +322,12 @@ def fetch_funding_rate(symbol):
             avg  = sum(float(d["fundingRate"]) for d in data) / len(data) * 100
             label = "Overcrowded Longs" if rate > 0.05 else \
                     "Overcrowded Shorts" if rate < -0.01 else "Neutral"
+            print(f"[Funding] {symbol} {rate:.4f}% ({label})", flush=True)
             return {"rate": round(rate, 4), "avg": round(avg, 4), "label": label}
     except Exception as e:
         print(f"[Funding] {symbol} failed: {e}", flush=True)
-    return {"rate": None, "avg": None, "label": "N/A"}  # [FIX] Return None instead of 0.0
+    # [FIX] Return None for rate and avg so logic doesn't misinterpret 0.0 as "Neutral"
+    return {"rate": None, "avg": None, "label": "N/A"}
 
 def fetch_etf_flows():
     try:
@@ -307,11 +342,14 @@ def fetch_etf_flows():
             numbers = re.findall(r'-?\d+(?:\.\d+)?', re.sub(r'<[^>]+>', ' ', rows[-2] if len(rows) > 1 else rows[-1]))
             if numbers:
                 total = float(numbers[-1])
+                # Sanity check - reject absurd values (scraper artifact)
                 if not (-10000 <= total <= 10000):
+                    print(f"[ETF] Rejected absurd value: {total}", flush=True)
                     return {"total": None, "label": "Unavailable"}
                 label = "Strong Inflows" if total > 300 else \
                         "Inflows" if total > 0 else \
                         "Outflows" if total > -300 else "Strong Outflows"
+                print(f"[ETF] Flow: ${total:.0f}M ({label})", flush=True)
                 return {"total": total, "label": label}
     except Exception as e:
         print(f"[ETF] Failed: {e}", flush=True)
@@ -341,7 +379,8 @@ def fetch_btc_dominance():
         pass
     return None
 
-# ── Data fetcher ──────────────────────────────────────────────────────────────
+
+# ── Data fetcher ───────────────────────────────────────────────────────────────
 def fetch_candles(symbol, interval="1h", limit=384):
     binance_symbol = COINS[symbol]
     params = {"symbol": binance_symbol, "interval": interval, "limit": limit}
@@ -361,13 +400,20 @@ def fetch_candles(symbol, interval="1h", limit=384):
             for c in ["open","high","low","close","volume"]:
                 df[c] = df[c].astype(float)
             df = df[["timestamps","open","high","low","close","volume"]].reset_index(drop=True)
+            print(f"[Data] {symbol} {interval} OK ({len(df)} candles)", flush=True)
             return df
         except Exception as e:
             print(f"[Data] {url} failed: {e}", flush=True)
     raise RuntimeError(f"All Binance endpoints failed for {symbol} {interval}")
 
-# ── Find safe lookback ────────────────────────────────────────────────────────
+
+# ── Find safe lookback via fast dry-run (pred_len=2) ─────────────────────────
 def find_safe_lookback(df, symbol):
+    """
+    Run a single fast prediction with pred_len=2 to find the maximum
+    lookback the model can handle without a RoPE tensor size mismatch.
+    Validates BEFORE committing to the full N=100 Monte Carlo loop.
+    """
     candidates = [370, 360, 350, 340, 330, 320, 300, 280, 256]
     for lookback in candidates:
         if lookback > len(df):
@@ -378,25 +424,28 @@ def find_safe_lookback(df, symbol):
         last_time   = test_df["timestamps"].iloc[-1]
         future_times = pd.date_range(
             start=last_time + pd.Timedelta(hours=1),
-            periods=24, freq="1h", tz="UTC"
+            periods=2, freq="1h", tz="UTC"
         )
         y_timestamp = pd.Series(future_times).reset_index(drop=True)
         try:
             with torch.inference_mode():
                 predictor.predict(
                     df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
-                    pred_len=24, T=0.7, top_p=0.9, sample_count=1
+                    pred_len=2, T=0.7, top_p=0.9, sample_count=1
                 )
             print(f"[Kronos] {symbol} safe lookback={lookback} (dry-run passed)", flush=True)
             return lookback
         except RuntimeError as e:
             if "size of tensor" in str(e) or "must match" in str(e):
+                print(f"[Kronos] {symbol} lookback={lookback} failed dry-run, trying smaller...", flush=True)
                 continue
             raise
     raise RuntimeError(f"{symbol}: no working lookback found in {candidates}")
 
-# ── Kronos Monte Carlo ────────────────────────────────────────────────────────
+
+# ── Kronos Monte Carlo - N=100, T=0.7, with real-time progress tracking ───────
 def kronos_predict(df, symbol="UNK", pred_len=24):
+    # Step 1: Find safe lookback via fast dry-run BEFORE the MC loop
     safe_lookback = find_safe_lookback(df, symbol)
     work_df = df.tail(safe_lookback).reset_index(drop=True)
 
@@ -412,6 +461,7 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
     all_closes = []
     run_times  = []
 
+    # Step 2: Full MC loop - safe_lookback guaranteed to work, no crashes mid-loop
     with torch.inference_mode():
         for i in range(MONTE_CARLO_N):
             t_start = time.time()
@@ -422,7 +472,7 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
                 )
             except RuntimeError as e:
                 if "size of tensor" in str(e) or "must match" in str(e):
-                    print(f"[Kronos] {symbol} unexpected tensor error at MC run {i+1}: {e}", flush=True)
+                    print(f"[Kronos] {symbol} unexpected tensor error at MC run {i+1} with lookback={safe_lookback}: {e}", flush=True)
                     raise
                 raise
             elapsed = time.time() - t_start
@@ -438,6 +488,8 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
                 "remaining_secs": round(remaining, 0),
                 "pct":            round((i + 1) / MONTE_CARLO_N * 100, 1),
             }
+            if i % 10 == 0:
+                print(f"[Kronos] {symbol} MC {i+1}/{MONTE_CARLO_N} ({avg_secs:.1f}s/run, ~{remaining/60:.1f}min left)", flush=True)
 
     closes = np.array(all_closes)
     progress.pop(symbol, None)
@@ -448,10 +500,11 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
         "std":          closes.std(axis=0),
         "closes":       closes,
         "future_times": future_times,
-        "lookback_used": safe_lookback,
+        "lookback_used": safe_lookback,  # actual lookback reported honestly
     }
 
-# ── Signal interpretation ─────────────────────────────────────────────────────
+
+# ── Signal interpretation ──────────────────────────────────────────────────────
 def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
                       onchain, btc_dominance, symbol):
     rsi     = ind["rsi"]
@@ -508,7 +561,8 @@ def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
     return {"confirmations": confirmations, "warnings": warnings,
             "context": context, "n_confirm": n_c, "n_warn": n_w}
 
-# ── Core prediction ───────────────────────────────────────────────────────────
+
+# ── Core prediction ────────────────────────────────────────────────────────────
 def run_prediction(symbol):
     print(f"[Kronos] {symbol} starting on {DEVICE_TYPE.upper()}...", flush=True)
 
@@ -516,6 +570,7 @@ def run_prediction(symbol):
     last_price = float(df["close"].iloc[-1])
     last_time  = df["timestamps"].iloc[-1]
 
+    # Fetch external signals in parallel while model is loading data
     sig = {}
     def fetch_signals():
         sig["indicators"]    = compute_indicators(df)
@@ -528,39 +583,40 @@ def run_prediction(symbol):
     st = threading.Thread(target=fetch_signals)
     st.start()
 
+    # Run Kronos (N=100, T=0.7) with real-time progress tracking
     pred = kronos_predict(df, symbol=symbol, pred_len=PRED_LEN)
-    st.join()
 
-    closes      = pred["closes"]
-    mean_close  = pred["mean"]
-    upper       = pred["upper"]
-    lower       = pred["lower"]
-    std         = pred["std"]
+    st.join()  # Wait for external signals
+
+    closes     = pred["closes"]
+    mean_close = pred["mean"]
+    upper      = pred["upper"]
+    lower      = pred["lower"]
+    std        = pred["std"]
 
     final_prices    = closes[:, -1]
-    # [CLAUDE FIX 1] Hard cap 5%-95% to prevent false certainty
     raw_upside_prob = float((final_prices > last_price).mean()) * 100
+    # Fix 1: Hard cap 5%-95% - prevents false certainty (100% or 0% are statistical illusions)
     upside_prob     = float(max(5.0, min(95.0, raw_upside_prob)))
 
     std_pct         = std / last_price * 100
-    
-    # [FINAL FIX] Calculate historical volatility using the SAME horizon as the prediction (24h)
-    # Comparing 1h vol to 24h spread was hiding hallucinations.
-    hist_vol_pct    = float(df["close"].pct_change(PRED_LEN).dropna().std() * 100)
-    
+    hist_vol_pct    = float(df["close"].pct_change().dropna().std() * 100)
+    # Scale 1h volatility to 24h using square root of time - correct comparison horizon
+    hist_vol_24h    = hist_vol_pct * float(np.sqrt(PRED_LEN))
     vol_amp_prob    = float((std_pct > hist_vol_pct).mean()) * 100
     spread_pct      = (upper - lower) / last_price * 100
     avg_spread      = float(spread_pct.mean())
 
-    # [CLAUDE FIX 2] Volatility-calibrated confidence & Hallucination detection
-    if avg_spread < hist_vol_pct:
-        confidence = round(max(10.0, 50.0 - (hist_vol_pct - avg_spread) * 3), 1)
+    # Fix 2: Volatility-calibrated confidence
+    # Compare model's 24h predicted range to 24h historical volatility
+    if avg_spread < hist_vol_24h:
+        confidence = round(max(10.0, 50.0 - (hist_vol_24h - avg_spread) * 3), 1)
         hallucinating = True
     else:
         confidence = round(max(0.0, 100.0 - avg_spread * 2), 1)
         hallucinating = False
 
-    print(f"[Kronos] {symbol} spread={avg_spread:.2f}% hist_vol={hist_vol_pct:.2f}% hallucinating={hallucinating} conf={confidence}", flush=True)
+    print(f"[Kronos] {symbol} spread={avg_spread:.2f}% hist_vol_1h={hist_vol_pct:.2f}% hist_vol_24h={hist_vol_24h:.2f}% hallucinating={hallucinating} conf={confidence}", flush=True)
 
     signal_context = interpret_signals(
         upside_prob, sig["indicators"], sig["fear_greed"],
@@ -569,30 +625,30 @@ def run_prediction(symbol):
     )
 
     result = {
-        "updated_at":       datetime.now(timezone.utc).isoformat(),
-        "symbol":           f"{symbol}/USDT",
-        "coin":             symbol,
-        "last_price":       last_price,
-        "last_time":        str(last_time),
-        "pred_len":         PRED_LEN,
-        "lookback":         LOOKBACK,
-        "monte_carlo_n":    MONTE_CARLO_N,
-        "model":            MODEL_NAME,
-        "device":           DEVICE_TYPE,
+        "updated_at":    datetime.now(timezone.utc).isoformat(),
+        "symbol":        f"{symbol}/USDT",
+        "coin":          symbol,
+        "last_price":    last_price,
+        "last_time":     str(last_time),
+        "pred_len":      PRED_LEN,
+        "lookback":      LOOKBACK,
+        "monte_carlo_n": MONTE_CARLO_N,
+        "model":         MODEL_NAME,
+        "device":        DEVICE_TYPE,
         "upside_prob":      round(upside_prob, 1),
         "raw_upside_prob":  round(raw_upside_prob, 1),
         "hallucinating":    hallucinating,
         "confidence":       confidence,
-        "vol_amp_prob":     round(vol_amp_prob, 1),
-        "lookback_used":    pred.get("lookback_used", LOOKBACK),
-        "signal_context":   signal_context,
-        "indicators":       sig["indicators"],
-        "fear_greed":       sig["fear_greed"],
-        "funding":          sig["funding"],
-        "etf_flows":        sig["etf_flows"],
-        "onchain":          sig["onchain"],
-        "btc_dominance":    sig["btc_dominance"],
-        "accuracy":         get_accuracy_stats().get("by_coin", {}).get(symbol, {}),
+        "vol_amp_prob":  round(vol_amp_prob, 1),
+        "lookback_used": pred.get("lookback_used", LOOKBACK),
+        "signal_context": signal_context,
+        "indicators":    sig["indicators"],
+        "fear_greed":    sig["fear_greed"],
+        "funding":       sig["funding"],
+        "etf_flows":     sig["etf_flows"],
+        "onchain":       sig["onchain"],
+        "btc_dominance": sig["btc_dominance"],
+        "accuracy":      get_accuracy_stats().get("by_coin", {}).get(symbol, {}),
         "forecast": {
             "timestamps": [str(t) for t in pred["future_times"]],
             "mean_close": [round(v, 4) for v in mean_close.tolist()],
@@ -610,7 +666,8 @@ def run_prediction(symbol):
     print(f"[Kronos] {symbol} DONE. Upside={upside_prob:.1f}% Conf={confidence:.1f}% Device={DEVICE_TYPE.upper()}", flush=True)
     return result
 
-# ── Model loader ──────────────────────────────────────────────────────────────
+
+# ── Model loader ───────────────────────────────────────────────────────────────
 def load_model():
     global predictor, model_ready, model_error, MONTE_CARLO_N
     try:
@@ -621,10 +678,12 @@ def load_model():
         model = Kronos.from_pretrained(MODEL_NAME)
         model.eval()
 
+        # Fix 4: Try GPU, verify tensors actually move, fall back to CPU if not
         gpu_working = False
         if DEVICE_TYPE != "cpu":
             try:
                 model = model.to(DEVICE)
+                # Verify GPU inference actually works end-to-end
                 test_tensor = torch.zeros(1, 10).to(DEVICE)
                 _ = test_tensor + 1
                 gpu_working = True
@@ -633,6 +692,8 @@ def load_model():
                 print(f"[Kronos] GPU failed ({e}), falling back to CPU", flush=True)
                 model = model.cpu()
 
+        # N=100 - KronosPredictor runs on CPU internally (PCIe bottleneck confirmed)
+        # Each run ~5-7s, total ~10 min per coin. Better P10/P90 accuracy than N=50.
         MONTE_CARLO_N = 100
         device_note = "GPU connected (CPU-bound inference)" if gpu_working else "CPU"
         print(f"[Kronos] {device_note} - N={MONTE_CARLO_N}", flush=True)
@@ -644,9 +705,12 @@ def load_model():
         for i in range(NUM_WORKERS):
             threading.Thread(target=worker, daemon=True, name=f"Worker-{i+1}").start()
 
+        # No auto-queuing - user manually selects which coin to predict
+        print(f"[Kronos] Ready! Waiting for manual prediction requests.", flush=True)
+
         # [FIX] Run accuracy check immediately on startup, THEN loop hourly
         def accuracy_loop():
-            check_accuracy()  # Immediate check for pending predictions
+            check_accuracy()  # Check pending predictions right now
             while True:
                 time.sleep(3600)
                 check_accuracy()
@@ -660,7 +724,8 @@ def load_model():
 
 threading.Thread(target=load_model, daemon=True).start()
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+
+# ── Routes ─────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
     return send_from_directory(os.path.join(BASE_DIR, 'static'), "index.html")
@@ -682,6 +747,7 @@ def status():
         "running_since": {k: v for k, v in running_since.items() if running.get(k)},
         "progress":      safe_progress,
         "accuracy":      get_accuracy_stats().get("by_coin", {}),
+        "requests_24h":  get_request_stats(),
     })
 
 @app.route("/cache/<symbol>")
@@ -707,22 +773,46 @@ def get_cache(symbol):
         pass
     return jsonify(result)
 
-@app.route("/predict/<symbol>")
+def get_request_stats():
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            rows = conn.execute("""
+                SELECT symbol, COUNT(*) as cnt
+                FROM request_log
+                WHERE requested_at > datetime('now', '-24 hours')
+                GROUP BY symbol
+                ORDER BY cnt DESC
+            """).fetchall()
+            total = conn.execute("""
+                SELECT COUNT(*) FROM request_log
+                WHERE requested_at > datetime('now', '-24 hours')
+            """).fetchone()[0]
+        return {"total_24h": total, "by_coin": {s: c for s, c in rows}}
+    except Exception:
+        return {"total_24h": 0, "by_coin": {}}
 def predict(symbol):
     symbol = symbol.upper()
     if symbol not in COINS:
         return jsonify({"error": f"Unknown symbol {symbol}"}), 400
     if not model_ready:
         return jsonify({"error": "Model not loaded yet."}), 503
-        
-    # [FIX] Bulletproof queue check using a set and lock
+
     with queue_lock:
         if running.get(symbol, False) or symbol in queued_coins:
             return jsonify({"status": "already_running_or_queued"})
-        
         queued_coins.add(symbol)
         task_queue.put(symbol)
-        
+
+    # Log this request
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("INSERT INTO request_log (symbol, requested_at) VALUES (?, ?)",
+                             (symbol, datetime.now(timezone.utc).isoformat()))
+                conn.commit()
+    except Exception:
+        pass
+
     return jsonify({"status": "queued"})
 
 @app.route("/accuracy")

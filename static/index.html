@@ -731,12 +731,17 @@ function refreshAll() {
         .then(function(r) { return r.json(); })
         .then(function(d) {
           queued++;
-          if (btn && queued === COINS.length) {
-            btn.innerHTML = '⚡ All';
-            btn.style.pointerEvents = 'auto';
+          if (queued === COINS.length) {
+            if (btn) { btn.innerHTML = '⚡ All'; btn.style.pointerEvents = 'auto'; }
+            // Switch to BTC and start timer so user sees progress
+            selectCoin('BTC');
+            fetch(BASE + '/status')
+              .then(function(r2) { return r2.json(); })
+              .then(function(s) { statusData = s; updateCoinButtons(); showCoinState(); })
+              .catch(function(){});
           }
         }).catch(function() {});
-    }, i * 300); // stagger requests slightly
+    }, i * 300);
   });
 }
 

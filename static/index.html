@@ -176,7 +176,17 @@ canvas{width:100%!important;height:100%!important}
   <span class="coin-btn" onclick="refreshAll()" id="btn-all" style="border-color:var(--purple);color:var(--purple)">⚡ All</span>
 </div>
 <div class="price-bar">
-  <div><div class="live-label" id="priceLabel">BTC / USDT</div><div class="live-price" id="livePrice">—</div></div>
+  <div>
+    <div class="live-label" id="priceLabel">BTC / USDT</div>
+    <div style="display:flex;align-items:baseline;gap:8px">
+      <div class="live-price" id="livePrice">—</div>
+      <div id="priceChange" style="font-size:13px;font-weight:700">—</div>
+    </div>
+    <div style="margin-top:4px;display:flex;gap:4px">
+      <button onclick="setPriceFrame('15m')" id="frame15m" style="font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--border);background:var(--card2);color:var(--muted2);cursor:pointer">15m</button>
+      <button onclick="setPriceFrame('1h')" id="frame1h" style="font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--accent);background:rgba(59,130,246,.15);color:var(--accent2);cursor:pointer">1h</button>
+    </div>
+  </div>
   <div style="display:flex;align-items:center;gap:10px">
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
     <button onclick="startPrediction()" style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent">🔄 Run</button>
@@ -366,14 +376,52 @@ function fmt(v) {
   return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
 }
 
+var priceFrame = '1h';
+var lastPrice = 0;
+
+function setPriceFrame(frame) {
+  priceFrame = frame;
+  var f15 = document.getElementById('frame15m');
+  var f1h = document.getElementById('frame1h');
+  if (frame === '15m') {
+    f15.style.borderColor = 'var(--accent)'; f15.style.background = 'rgba(59,130,246,.15)'; f15.style.color = 'var(--accent2)';
+    f1h.style.borderColor = 'var(--border)';  f1h.style.background = 'var(--card2)';          f1h.style.color = 'var(--muted2)';
+  } else {
+    f1h.style.borderColor = 'var(--accent)'; f1h.style.background = 'rgba(59,130,246,.15)'; f1h.style.color = 'var(--accent2)';
+    f15.style.borderColor = 'var(--border)'; f15.style.background = 'var(--card2)';          f15.style.color = 'var(--muted2)';
+  }
+  updatePctChange();
+}
+
+// Fetch only current price — runs every 1 second
 function livePx() {
   fetch('https://api.binance.com/api/v3/ticker/price?symbol=' + BSYMS[currentCoin])
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      var p = parseFloat(d.price);
-      var dec = p < 1 ? 6 : p < 100 ? 4 : 2;
-      document.getElementById('livePrice').textContent = '$' + p.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:dec});
+      lastPrice = parseFloat(d.price);
+      var dec = lastPrice < 1 ? 6 : lastPrice < 100 ? 4 : 2;
+      document.getElementById('livePrice').textContent = '$' + lastPrice.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
       document.getElementById('priceLabel').textContent = currentCoin + ' / USDT';
+      // Update % change display using cached lastPrice vs pastClose
+      if (window._pastClose && window._pastClose[currentCoin]) {
+        var chg = ((lastPrice - window._pastClose[currentCoin]) / window._pastClose[currentCoin] * 100);
+        var el = document.getElementById('priceChange');
+        el.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+        el.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
+      }
+    }).catch(function(){});
+}
+
+// Fetch past candle for % change — runs every 10 seconds only
+function updatePctChange() {
+  var interval = priceFrame === '15m' ? '15m' : '1h';
+  fetch('https://api.binance.com/api/v3/klines?symbol=' + BSYMS[currentCoin] + '&interval=' + interval + '&limit=2')
+    .then(function(r) { return r.json(); })
+    .then(function(candles) {
+      if (candles && candles.length >= 2) {
+        if (!window._pastClose) window._pastClose = {};
+        window._pastClose[currentCoin] = parseFloat(candles[0][4]);
+      }
     }).catch(function(){});
 }
 
@@ -746,7 +794,9 @@ function refreshAll() {
 }
 
 livePx();
-setInterval(livePx, 10000);
+updatePctChange();
+setInterval(livePx, 1000);
+setInterval(updatePctChange, 10000);
 checkStatus();
 
 function openDrawer() {

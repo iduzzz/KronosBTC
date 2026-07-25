@@ -472,7 +472,11 @@ function updateCoinButtons() {
 function selectCoin(coin) {
   currentCoin = coin;
   updateCoinButtons();
+  // Clear old % immediately so stale value doesn't show
+  var el = document.getElementById('priceChange');
+  if (el) el.textContent = '...';
   livePx();
+  updatePctChange(); // fetch fresh % for new coin immediately
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   showCoinState();
 }

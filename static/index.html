@@ -405,19 +405,17 @@ function livePx() {
     }).catch(function(){});
 }
 
-// Fetch % change using Binance rolling window ticker - exact 15m or 1h change
+// Fetch % change using 1m klines — exact price from X minutes ago
 function updatePctChange() {
-  var window_size = priceFrame === '15m' ? '15m' : '1h';
-  fetch('https://api.binance.com/api/v3/ticker?symbol=' + BSYMS[currentCoin] + '&windowSize=' + window_size)
+  var minutes = priceFrame === '15m' ? 16 : 61;
+  fetch('https://api.binance.com/api/v3/klines?symbol=' + BSYMS[currentCoin] + '&interval=1m&limit=' + minutes)
     .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d && d.priceChangePercent !== undefined) {
-        var chg = parseFloat(d.priceChangePercent);
-        if (!window._pastClose) window._pastClose = {};
-        // Store open price for this window
-        window._pastClose[currentCoin] = parseFloat(d.openPrice);
+    .then(function(candles) {
+      if (candles && candles.length >= minutes) {
+        var pastPrice = parseFloat(candles[0][4]); // close of oldest candle = price X min ago
+        var chg = ((lastPrice - pastPrice) / pastPrice * 100);
         var el = document.getElementById('priceChange');
-        if (el) {
+        if (el && lastPrice > 0) {
           el.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
           el.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
         }

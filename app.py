@@ -662,6 +662,80 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
     }
 
 
+# ── Circuit Breaker ────────────────────────────────────────────────────────────
+def circuit_breaker_check(symbol):
+    """
+    Returns (True, "OK") if safe to trade.
+    Returns (False, reason) if circuit is broken.
+    Requires minimum 20 overall / 10 per-coin predictions before activating.
+    """
+    try:
+        stats = get_accuracy_stats()
+        baselines = stats.get("baselines", {})
+        by_coin   = stats.get("by_coin", {})
+
+        # Overall circuit: if Kronos < 50% accuracy over 20+ predictions
+        total = baselines.get("total", 0)
+        if total >= 20:
+            kronos_pct = baselines.get("kronos_pct", 50)
+            if kronos_pct < 50:
+                return False, f"Circuit broken: overall accuracy {kronos_pct}% over {total} predictions"
+
+        # Per-coin circuit: if this coin < 40% over 10+ predictions
+        coin_data = by_coin.get(symbol, {})
+        if coin_data.get("total", 0) >= 10:
+            if coin_data.get("pct", 50) < 40:
+                return False, f"Circuit broken for {symbol}: accuracy {coin_data['pct']}% over {coin_data['total']} predictions"
+
+    except Exception as e:
+        print(f"[Circuit] Check failed: {e}", flush=True)
+
+    return True, "OK"
+
+
+# ── Position Sizing (advisory only — never a command) ─────────────────────────
+def compute_position_size(upside_prob, confidence, regime, last_price, p10, p90, capital=10000):
+    """
+    Advisory position sizing using simplified Kelly criterion.
+    This is DISPLAY ONLY — never a trade command.
+    Capital default = 10000 (adjust in UI per your actual capital).
+    """
+    try:
+        edge = abs(upside_prob - 50) / 50.0  # 0 to 1
+
+        regime_mult = {"Trending": 1.0, "Weak Trend": 0.6, "Choppy": 0.0}.get(regime, 0.5)
+        conf_mult   = max(0.1, confidence / 100.0)
+
+        avg_win  = abs(p90 - last_price) / last_price if last_price > 0 else 0.05
+        avg_loss = abs(last_price - p10) / last_price if last_price > 0 else 0.05
+        avg_loss = max(avg_loss, 0.001)
+
+        kelly = (edge * avg_win - (1 - edge) * avg_loss) / avg_win
+        kelly = max(0.0, min(kelly, 0.25))  # cap at quarter-Kelly
+
+        size     = kelly * regime_mult * conf_mult
+        size     = min(size, 0.10)  # hard cap: never more than 10% of capital
+
+        direction = "LONG" if upside_prob >= 50 else "SHORT"
+        stop      = p10 if direction == "LONG" else p90
+        risk_dist = abs(last_price - stop)
+        target    = last_price + (1.5 * risk_dist) if direction == "LONG" else last_price - (1.5 * risk_dist)
+        risk_pct  = size * (risk_dist / last_price) if last_price > 0 else 0
+
+        return {
+            "direction":       direction,
+            "size_pct":        round(size * 100, 2),
+            "stop_loss":       round(stop, 4),
+            "take_profit":     round(target, 4),
+            "risk_pct":        round(risk_pct * 100, 2),
+            "max_position_usd": round(capital * size, 2),
+            "capital_assumed": capital,
+        }
+    except Exception as e:
+        print(f"[PositionSize] Failed: {e}", flush=True)
+        return None
+
+
 # ── Signal interpretation ──────────────────────────────────────────────────────
 def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
                       onchain, btc_dominance, symbol):
@@ -709,14 +783,22 @@ def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
     if not ind.get("vol_valid", True):
         warnings.append(f"Unusual volume detected ({ind['vol_ratio']:.2f}x) - data may be unreliable")
 
-    # #8: Regime warning
-    if regime == "Choppy" and (fund is None or abs(fund) < 0.01):
-        warnings.append(f"Market choppy (ADX={adx:.0f}) - predictions less reliable")
+    # #8: Hard regime veto — choppy + neutral funding = NO_TRADE regardless of Kronos
+    choppy_veto = (adx < 20) and (fund is None or abs(fund) < 0.01)
+    if choppy_veto:
+        warnings.append(f"REGIME VETO: Market choppy (ADX={adx:.0f}) + neutral funding - trade signal forced to NO_TRADE")
 
     n_c, n_w = len(confirmations), len(warnings)
 
-    # #6 (softened): Advisory trade signal
-    if upside_prob > 60 and n_c >= 2 and n_w == 0:
+    # Circuit breaker check
+    circuit_ok, circuit_msg = circuit_breaker_check(symbol)
+
+    # Trade signal — hard veto overrides everything
+    if not circuit_ok:
+        trade_signal = "CIRCUIT_BROKEN"
+    elif choppy_veto:
+        trade_signal = "NO_TRADE"
+    elif upside_prob > 60 and n_c >= 2 and n_w == 0:
         trade_signal = "LONG"
     elif upside_prob < 40 and n_c >= 2 and n_w == 0:
         trade_signal = "SHORT"
@@ -730,7 +812,8 @@ def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
     return {
         "confirmations": confirmations, "warnings": warnings,
         "context": context, "n_confirm": n_c, "n_warn": n_w,
-        "trade_signal": trade_signal, "regime": regime, "adx": adx,
+        "trade_signal": trade_signal, "circuit_msg": circuit_msg,
+        "regime": regime, "adx": adx,
     }
 
 
@@ -851,6 +934,11 @@ def run_prediction(symbol):
         "onchain":            sig["onchain"],
         "btc_dominance":      sig["btc_dominance"],
         "accuracy":           get_accuracy_stats().get("by_coin", {}).get(symbol, {}),
+        "position_size":      compute_position_size(
+                                  upside_prob, confidence,
+                                  signal_context.get("regime", "Unknown"),
+                                  last_price, float(lower[-1]), float(upper[-1])
+                              ),
         "forecast": {
             "timestamps": [str(t) for t in pred["future_times"]],
             "mean_close": [round(v, 4) for v in mean_close.tolist()],

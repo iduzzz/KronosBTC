@@ -46,9 +46,7 @@ NUM_WORKERS    = 1
 DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
 
 COINS = {
-    "ZEC": "ZECUSDT", "TAO": "TAOUSDT", "BTC": "BTCUSDT", "ETH": "ETHUSDT",
-    "BNB": "BNBUSDT", "ADA": "ADAUSDT", "SOL": "SOLUSDT",
-    "XRP": "XRPUSDT", "NPC": "NPCUSDT",
+    "ZEC": "ZECUSDT", "BTC": "BTCUSDT", "TAO": "TAOUSDT", "ETH": "ETHUSDT",
 }
 
 predictor    = None

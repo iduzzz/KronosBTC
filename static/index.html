@@ -142,7 +142,7 @@ canvas{width:100%!important;height:100%!important}
     <div class="info-row"><span class="info-label">Lookback</span><span class="info-val">384h (16 days)</span></div>
     <div class="info-row"><span class="info-label">Refresh</span><span class="info-val">Manual only</span></div>
     <div class="info-row"><span class="info-label">Requests (24h)</span><span class="info-val" id="infoRequests">-</span></div>
-    <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">ZEC TAO BTC ETH BNB ADA SOL XRP NPC</span></div>
+    <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">ZEC BTC TAO ETH</span></div>
   </div>
   <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
     <div class="drawer-section-title">How to Read</div>
@@ -158,14 +158,9 @@ canvas{width:100%!important;height:100%!important}
 
 <div class="coin-bar">
   <span class="coin-btn active" onclick="selectCoin('ZEC')" id="btn-ZEC">ZEC</span>
-  <span class="coin-btn" onclick="selectCoin('TAO')" id="btn-TAO">TAO</span>
   <span class="coin-btn" onclick="selectCoin('BTC')" id="btn-BTC">BTC</span>
+  <span class="coin-btn" onclick="selectCoin('TAO')" id="btn-TAO">TAO</span>
   <span class="coin-btn" onclick="selectCoin('ETH')" id="btn-ETH">ETH</span>
-  <span class="coin-btn" onclick="selectCoin('BNB')" id="btn-BNB">BNB</span>
-  <span class="coin-btn" onclick="selectCoin('ADA')" id="btn-ADA">ADA</span>
-  <span class="coin-btn" onclick="selectCoin('SOL')" id="btn-SOL">SOL</span>
-  <span class="coin-btn" onclick="selectCoin('XRP')" id="btn-XRP">XRP</span>
-  <span class="coin-btn" onclick="selectCoin('NPC')" id="btn-NPC">NPC</span>
   <span class="coin-btn" onclick="refreshAll()" id="btn-all" style="border-color:var(--purple);color:var(--purple)">All</span>
 </div>
 
@@ -328,8 +323,8 @@ canvas{width:100%!important;height:100%!important}
 
 <script>
 var BASE = window.location.origin;
-var COINS = ['ZEC','TAO','BTC','ETH','BNB','ADA','SOL','XRP','NPC'];
-var BSYMS = {ZEC:'ZECUSDT',TAO:'TAOUSDT',BTC:'BTCUSDT',ETH:'ETHUSDT',BNB:'BNBUSDT',ADA:'ADAUSDT',SOL:'SOLUSDT',XRP:'XRPUSDT',NPC:'NPCUSDT'};
+var COINS = ['ZEC','BTC','TAO','ETH'];
+var BSYMS = {ZEC:'ZECUSDT',BTC:'BTCUSDT',TAO:'TAOUSDT',ETH:'ETHUSDT'};
 var currentCoin = 'ZEC';
 var pollTimer = null;
 var statusData = {};

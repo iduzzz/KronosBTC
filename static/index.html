@@ -405,20 +405,21 @@ function livePx() {
     }).catch(function(){});
 }
 
-// Fetch % change using 1m klines — exact price from X minutes ago
+// Fetch % change - gets both past and current price in one call
 function updatePctChange() {
   var minutes = priceFrame === '15m' ? 16 : 61;
   fetch('https://api.binance.com/api/v3/klines?symbol=' + BSYMS[currentCoin] + '&interval=1m&limit=' + minutes)
     .then(function(r) { return r.json(); })
     .then(function(candles) {
-      if (candles && candles.length >= minutes) {
-        var pastPrice = parseFloat(candles[0][4]); // close of oldest candle = price X min ago
-        var chg = ((lastPrice - pastPrice) / pastPrice * 100);
-        var el = document.getElementById('priceChange');
-        if (el && lastPrice > 0) {
-          el.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-          el.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
-        }
+      if (!candles || candles.length < 2) return;
+      var pastPrice   = parseFloat(candles[0][1]);    // open of oldest candle
+      var currentPrice = parseFloat(candles[candles.length-1][4]); // close of latest candle
+      if (pastPrice <= 0 || currentPrice <= 0) return;
+      var chg = ((currentPrice - pastPrice) / pastPrice * 100);
+      var el = document.getElementById('priceChange');
+      if (el) {
+        el.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+        el.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
       }
     }).catch(function(){});
 }

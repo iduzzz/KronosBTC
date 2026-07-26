@@ -92,6 +92,7 @@ canvas{width:100%!important;height:100%!important}
 .badge-orange{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--orange)}
 .badge-green{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:var(--green)}
 .badge-purple{background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.3);color:var(--purple)}
+.badge-red{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red)}
 .spinner{width:10px;height:10px;border:2px solid rgba(245,158,11,.3);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .updated{text-align:center;font-size:11px;color:var(--muted);padding:2px 0 6px}
@@ -102,6 +103,12 @@ canvas{width:100%!important;height:100%!important}
 .signal-val{font-size:13px;font-weight:700;margin-bottom:2px}
 .signal-label{font-size:9px;color:var(--muted);text-transform:uppercase}
 .accuracy-box{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center;margin-top:8px}
+.trade-card-long{background:rgba(16,185,129,.1);border:2px solid var(--green);border-radius:14px;padding:14px;text-align:center;margin-bottom:4px}
+.trade-card-short{background:rgba(239,68,68,.1);border:2px solid var(--red);border-radius:14px;padding:14px;text-align:center;margin-bottom:4px}
+.trade-card-none{background:var(--card2);border:1px solid var(--border);border-radius:14px;padding:14px;text-align:center;margin-bottom:4px}
+.regime-badge-trending{background:rgba(16,185,129,.1);border:1px solid rgba(16,185,129,.3);color:var(--green);border-radius:99px;padding:3px 10px;font-size:11px;font-weight:600}
+.regime-badge-choppy{background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);color:var(--orange);border-radius:99px;padding:3px 10px;font-size:11px;font-weight:600}
+.regime-badge-weak{background:rgba(100,116,139,.1);border:1px solid rgba(100,116,139,.3);color:var(--muted2);border-radius:99px;padding:3px 10px;font-size:11px;font-weight:600}
 .hidden{display:none}
 </style>
 </head>
@@ -112,59 +119,43 @@ canvas{width:100%!important;height:100%!important}
   </button>
   <div class="header-logo">Foundation Model</div>
   <div class="header-title">Kronos Forecast</div>
-  <div class="header-sub" id="headerSub">Kronos-base · 102M · N=50 · T=0.7 · Manual refresh</div>
+  <div class="header-sub" id="headerSub">Kronos-base . 102M . N=100 . T=0.7 . Manual refresh</div>
 </div>
 
-<!-- Drawer overlay -->
 <div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
-
-<!-- Drawer menu -->
 <div class="drawer" id="drawer">
   <div class="drawer-header">
-    <div class="drawer-title">📊 Kronos Menu</div>
-    <button class="drawer-close" onclick="closeDrawer()">✕</button>
+    <div class="drawer-title">Kronos Menu</div>
+    <button class="drawer-close" onclick="closeDrawer()">X</button>
   </div>
-
-  <!-- Accuracy statistics -->
   <div class="drawer-section">
     <div class="drawer-section-title">Prediction Accuracy (24h Direction)</div>
     <div id="accuracyList">
-      <div class="acc-empty">
-        🕐 No accuracy data yet.<br><br>
-        After 24 hours, the app automatically checks whether each prediction was correct and logs it here.<br><br>
-        Check back tomorrow.
-      </div>
+      <div class="acc-empty">No accuracy data yet.<br><br>After 24 hours, predictions are checked automatically.<br><br>Check back tomorrow.</div>
     </div>
   </div>
-
-  <!-- App info -->
   <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
     <div class="drawer-section-title">App Info</div>
     <div class="info-row"><span class="info-label">Model</span><span class="info-val">Kronos-base 102M</span></div>
-    <div class="info-row"><span class="info-label">Device</span><span class="info-val" id="infoDevice">—</span></div>
-    <div class="info-row"><span class="info-label">Monte Carlo N</span><span class="info-val" id="infoN">—</span></div>
+    <div class="info-row"><span class="info-label">Device</span><span class="info-val" id="infoDevice">-</span></div>
+    <div class="info-row"><span class="info-label">Monte Carlo N</span><span class="info-val" id="infoN">-</span></div>
     <div class="info-row"><span class="info-label">Lookback</span><span class="info-val">384h (16 days)</span></div>
     <div class="info-row"><span class="info-label">Refresh</span><span class="info-val">Manual only</span></div>
-    <div class="info-row"><span class="info-label">Requests (24h)</span><span class="info-val" id="infoRequests">—</span></div>
+    <div class="info-row"><span class="info-label">Requests (24h)</span><span class="info-val" id="infoRequests">-</span></div>
     <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">BTC ETH BNB SOL ADA ZEC TAO</span></div>
   </div>
-
-  <!-- How to read -->
   <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
-    <div class="drawer-section-title">How to Read Results</div>
+    <div class="drawer-section-title">How to Read</div>
     <div style="font-size:12px;color:var(--muted2);line-height:1.8">
-      <div>🎯 <strong style="color:var(--text)">Upside Prob</strong> — Kronos primary signal. % of Monte Carlo paths predicting price goes UP in 24h.</div>
-      <br>
-      <div>📊 <strong style="color:var(--text)">Confidence</strong> — How tight the P10/P90 band is. High = paths agree. Low = high uncertainty.</div>
-      <br>
-      <div>✓ <strong style="color:var(--green)">Confirmations</strong> — Auxiliary signals agreeing with Kronos direction.</div>
-      <br>
-      <div>⚠ <strong style="color:var(--orange)">Warnings</strong> — Signals contradicting or adding caution to Kronos.</div>
-      <br>
-      <div>📈 <strong style="color:var(--text)">P10/P90</strong> — 80% of Monte Carlo paths fell between these price levels.</div>
+      <div><strong style="color:var(--green)">LONG</strong> -- Kronos >60% bullish + 2 confirmations + 0 warnings</div><br>
+      <div><strong style="color:var(--red)">SHORT</strong> -- Kronos <40% bearish + 2 confirmations + 0 warnings</div><br>
+      <div><strong style="color:var(--muted2)">NO TRADE</strong> -- Insufficient edge. Most predictions will be here.</div><br>
+      <div><strong style="color:var(--text)">P10/P90</strong> -- 80% of Monte Carlo paths fell between these levels. Track whether actual price lands inside.</div><br>
+      <div><strong style="color:var(--text)">Regime</strong> -- ADX-based: Trending (ADX>25), Weak Trend (20-25), Choppy (<20).</div>
     </div>
   </div>
 </div>
+
 <div class="coin-bar">
   <span class="coin-btn active" onclick="selectCoin('BTC')" id="btn-BTC">BTC</span>
   <span class="coin-btn" onclick="selectCoin('ETH')" id="btn-ETH">ETH</span>
@@ -173,14 +164,15 @@ canvas{width:100%!important;height:100%!important}
   <span class="coin-btn" onclick="selectCoin('ADA')" id="btn-ADA">ADA</span>
   <span class="coin-btn" onclick="selectCoin('ZEC')" id="btn-ZEC">ZEC</span>
   <span class="coin-btn" onclick="selectCoin('TAO')" id="btn-TAO">TAO</span>
-  <span class="coin-btn" onclick="refreshAll()" id="btn-all" style="border-color:var(--purple);color:var(--purple)">⚡ All</span>
+  <span class="coin-btn" onclick="refreshAll()" id="btn-all" style="border-color:var(--purple);color:var(--purple)">All</span>
 </div>
+
 <div class="price-bar">
   <div>
     <div class="live-label" id="priceLabel">BTC / USDT</div>
     <div style="display:flex;align-items:baseline;gap:8px">
-      <div class="live-price" id="livePrice">—</div>
-      <div id="priceChange" style="font-size:13px;font-weight:700">—</div>
+      <div class="live-price" id="livePrice">-</div>
+      <div id="priceChange" style="font-size:13px;font-weight:700">-</div>
     </div>
     <div style="margin-top:4px;display:flex;gap:4px">
       <button onclick="setPriceFrame('15m')" id="frame15m" style="font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--border);background:var(--card2);color:var(--muted2);cursor:pointer">15m</button>
@@ -190,22 +182,23 @@ canvas{width:100%!important;height:100%!important}
   </div>
   <div style="display:flex;align-items:center;gap:10px">
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
-    <button onclick="startPrediction()" style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent">🔄 Run</button>
+    <button onclick="startPrediction()" style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent">Run</button>
   </div>
 </div>
+
 <div class="content">
-  <div class="status-row" id="statusRow"><span>⏳</span><span>Connecting…</span></div>
+  <div class="status-row" id="statusRow"><span>...</span><span>Connecting...</span></div>
 
   <div class="computing-card" id="computingCard">
     <div class="computing-icon">🧠</div>
     <div class="computing-title" id="computingTitle">Computing Prediction</div>
-    <div class="computing-sub" id="computingSub">Running Kronos-base N=100 Monte Carlo<br>+ ETF flows + funding rates + on-chain data</div>
+    <div class="computing-sub">Running Kronos-base N=100 + greedy path + ETF flows + funding rates + on-chain data</div>
     <div class="prog-bg"><div class="prog-fill" id="progFill"></div></div>
-    <div class="prog-label" id="computingLabel">Please wait…</div>
+    <div class="prog-label" id="computingLabel">Please wait...</div>
     <div class="timer-box">
       <div class="timer-val" id="timerDisplay">00:00</div>
       <div class="timer-label">Elapsed time</div>
-      <div class="timer-rem" id="timerRemaining">Estimating…</div>
+      <div class="timer-rem" id="timerRemaining">Estimating...</div>
     </div>
   </div>
 
@@ -221,20 +214,30 @@ canvas{width:100%!important;height:100%!important}
 
   <div id="results" class="hidden">
     <div class="badge-row" style="margin-bottom:4px">
-      <span class="badge badge-orange hidden" id="refreshBadge"><div class="spinner"></div> Refreshing…</span>
+      <span class="badge badge-orange hidden" id="refreshBadge"><div class="spinner"></div> Refreshing...</span>
     </div>
     <div class="updated" id="updatedTime"></div>
 
-    <!-- Primary: Kronos signal -->
+    <!-- Trade Signal (advisory) -->
+    <div id="tradeCard" class="trade-card-none">
+      <div style="font-size:11px;color:var(--muted2);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">Advisory Signal</div>
+      <div style="font-size:28px;font-weight:900" id="tradeSignal">-</div>
+      <div style="font-size:12px;margin-top:4px" id="tradeReason"></div>
+    </div>
+
+    <!-- Kronos Primary Signal -->
     <div class="card">
-      <div class="card-title">Kronos Model Signal (Primary)</div>
+      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+        <span>Kronos Model Signal (Primary)</span>
+        <span id="regimeBadge" class="regime-badge-weak">-</span>
+      </div>
       <div class="metrics">
         <div class="metric">
-          <div class="metric-value" id="upsideVal">—</div>
+          <div class="metric-value" id="upsideVal">-</div>
           <div class="metric-label">Upside Probability<br>(Kronos-base)</div>
         </div>
         <div class="metric">
-          <div class="metric-value" id="confidenceVal">—</div>
+          <div class="metric-value" id="confidenceVal">-</div>
           <div class="metric-label">Model<br>Confidence</div>
         </div>
       </div>
@@ -244,12 +247,12 @@ canvas{width:100%!important;height:100%!important}
       </div>
       <div id="accuracyBox" class="accuracy-box hidden">
         <div style="font-size:12px;color:var(--muted2)">Historical Accuracy (this coin)</div>
-        <div style="font-size:18px;font-weight:800;margin-top:4px" id="accuracyVal">—</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:2px" id="accuracyCount">—</div>
+        <div style="font-size:18px;font-weight:800;margin-top:4px" id="accuracyVal">-</div>
+        <div style="font-size:10px;color:var(--muted);margin-top:2px" id="accuracyCount">-</div>
       </div>
     </div>
 
-    <!-- Signal context -->
+    <!-- Signal Context -->
     <div class="card">
       <div class="card-title">Signal Context (Auxiliary Filters)</div>
       <div id="contextSummary" style="font-size:13px;font-weight:600;margin-bottom:10px"></div>
@@ -257,43 +260,44 @@ canvas{width:100%!important;height:100%!important}
       <div id="warnings"></div>
     </div>
 
-    <!-- Price target -->
+    <!-- Price Target -->
     <div class="card">
-      <div class="card-title">24h Price Target (P10–P90 · N=100)</div>
+      <div class="card-title">24h Price Target (P10-P90 . N=100 . Greedy Mean)</div>
       <div style="display:flex;justify-content:space-between;align-items:center">
         <div>
-          <div style="font-size:28px;font-weight:800" id="targetPrice">—</div>
-          <div style="font-size:13px;color:var(--muted2);margin-top:4px" id="targetChange">—</div>
+          <div style="font-size:28px;font-weight:800" id="targetPrice">-</div>
+          <div style="font-size:13px;color:var(--muted2);margin-top:4px" id="targetChange">-</div>
         </div>
         <div style="text-align:right">
           <div style="font-size:11px;color:var(--muted);margin-bottom:2px">P90 / P10</div>
-          <div style="font-size:13px;font-weight:600;color:var(--green)" id="tHigh">—</div>
-          <div style="font-size:13px;font-weight:600;color:var(--red)" id="tLow">—</div>
+          <div style="font-size:13px;font-weight:600;color:var(--green)" id="tHigh">-</div>
+          <div style="font-size:13px;font-weight:600;color:var(--red)" id="tLow">-</div>
         </div>
       </div>
     </div>
 
-    <!-- Technical indicators -->
+    <!-- Technical Indicators -->
     <div class="card">
       <div class="card-title">Technical Indicators</div>
       <div class="ind-grid">
-        <div class="ind-item"><div class="ind-val" id="rsiVal">—</div><div class="ind-label">RSI 14</div></div>
-        <div class="ind-item"><div class="ind-val" id="macdVal">—</div><div class="ind-label">MACD</div></div>
-        <div class="ind-item"><div class="ind-val" id="bbVal">—</div><div class="ind-label">BB %</div></div>
-        <div class="ind-item"><div class="ind-val" id="volRatioVal">—</div><div class="ind-label">Vol Ratio</div></div>
-        <div class="ind-item"><div class="ind-val" id="sma20Val">—</div><div class="ind-label">SMA 20</div></div>
-        <div class="ind-item"><div class="ind-val" id="fgVal">—</div><div class="ind-label">Fear&amp;Greed</div></div>
+        <div class="ind-item"><div class="ind-val" id="rsiVal">-</div><div class="ind-label">RSI 14</div></div>
+        <div class="ind-item"><div class="ind-val" id="macdVal">-</div><div class="ind-label">MACD</div></div>
+        <div class="ind-item"><div class="ind-val" id="bbVal">-</div><div class="ind-label">BB %</div></div>
+        <div class="ind-item"><div class="ind-val" id="volRatioVal">-</div><div class="ind-label">Vol Ratio</div></div>
+        <div class="ind-item"><div class="ind-val" id="sma20Val">-</div><div class="ind-label">SMA 20</div></div>
+        <div class="ind-item"><div class="ind-val" id="adxVal">-</div><div class="ind-label">ADX</div></div>
+        <div class="ind-item"><div class="ind-val" id="fgVal">-</div><div class="ind-label">Fear&amp;Greed</div></div>
       </div>
     </div>
 
-    <!-- Crypto-native signals -->
+    <!-- Crypto-Native Signals -->
     <div class="card">
       <div class="card-title">Crypto-Native Signals</div>
       <div class="signal-grid">
-        <div class="signal-item"><div class="signal-val" id="fundingVal">—</div><div class="signal-label">Funding Rate</div></div>
-        <div class="signal-item" id="etfItem"><div class="signal-val" id="etfVal">—</div><div class="signal-label">ETF Flows</div></div>
-        <div class="signal-item"><div class="signal-val" id="memVal">—</div><div class="signal-label">Mempool</div></div>
-        <div class="signal-item" id="domItem"><div class="signal-val" id="domVal">—</div><div class="signal-label">BTC Dominance</div></div>
+        <div class="signal-item"><div class="signal-val" id="fundingVal">-</div><div class="signal-label">Funding Rate</div></div>
+        <div class="signal-item" id="etfItem"><div class="signal-val" id="etfVal">-</div><div class="signal-label">ETF Flows</div></div>
+        <div class="signal-item"><div class="signal-val" id="memVal">-</div><div class="signal-label">Mempool</div></div>
+        <div class="signal-item" id="domItem"><div class="signal-val" id="domVal">-</div><div class="signal-label">BTC Dominance</div></div>
       </div>
     </div>
 
@@ -313,10 +317,10 @@ canvas{width:100%!important;height:100%!important}
     </div>
 
     <div class="badge-row" style="padding:4px 0;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
-      <span class="badge badge-blue" id="deviceBadge">🧠 Kronos-base · N=100</span>
-      <span class="badge badge-purple" id="gpuBadge" style="display:none">⚡ GPU Active</span>
+      <span class="badge badge-blue" id="deviceBadge">Kronos-base . N=100</span>
+      <span class="badge badge-purple" id="gpuBadge" style="display:none">GPU Active</span>
     </div>
-    <button class="btn-predict" onclick="startPrediction()" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);margin-top:4px">🔄 Request Fresh Prediction</button>
+    <button class="btn-predict" onclick="startPrediction()" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);margin-top:4px">Request Fresh Prediction</button>
   </div>
 </div>
 
@@ -329,87 +333,48 @@ var pollTimer = null;
 var statusData = {};
 var timerInterval = null;
 var timerStartedAt = null;
-
-function startTimer() {
-  if (timerInterval) return;
-  timerInterval = setInterval(function() {
-    var isRunning = statusData.running && statusData.running[currentCoin];
-    var startTime = statusData.running_since && statusData.running_since[currentCoin];
-    
-    var te = document.getElementById('timerDisplay');
-    var tr = document.getElementById('timerRemaining');
-    var pf = document.getElementById('progFill');
-    
-    if (!isRunning || !startTime) {
-      if (tr) tr.textContent = 'Queued - waiting for worker to start...';
-      if (pf) pf.style.width = '3%';
-      return;
-    }
-    
-    var now = Date.now() / 1000;
-    var elapsed = Math.floor(now - startTime);
-    if (elapsed < 0) elapsed = 0;
-    
-    var em = String(Math.floor(elapsed/60)).padStart(2,'0');
-    var es = String(elapsed%60).padStart(2,'0');
-    if (te) te.textContent = em + ':' + es + ' elapsed';
-    
-    var prog = statusData.progress && statusData.progress[currentCoin];
-    if (prog && prog.total > 0) {
-      var remSecs = Math.max(0, prog.remaining_secs);
-      var rm = String(Math.floor(remSecs/60)).padStart(2,'0');
-      var rs = String(Math.floor(remSecs%60)).padStart(2,'0');
-      if (tr) tr.textContent = 'MC ' + prog.current + '/' + prog.total + ' | ' + prog.secs_per_run.toFixed(1) + 's/run | ~' + rm + ':' + rs + ' remaining';
-      if (pf) pf.style.width = prog.pct + '%';
-    } else {
-      if (tr) tr.textContent = 'Fetching data & preparing model...';
-      if (pf) pf.style.width = '3%';
-    }
-  }, 1000);
-}
-
-function stopTimer() {
-  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
-}
+var priceFrame = '24h';
+var lastPrice = 0;
 
 function fmt(v) {
   var dec = v < 1 ? 6 : v < 100 ? 4 : 2;
   return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
 }
 
-var priceFrame = '24h';
-var lastPrice = 0;
-
 function setPriceFrame(frame) {
   priceFrame = frame;
   ['frame15m','frame1h','frame24h'].forEach(function(id) {
     var el = document.getElementById(id);
-    if (el) { el.style.borderColor='var(--border)'; el.style.background='var(--card2)'; el.style.color='var(--muted2)'; }
+    if (!el) return;
+    el.style.borderColor = 'var(--border)';
+    el.style.background  = 'var(--card2)';
+    el.style.color       = 'var(--muted2)';
   });
-  var active = document.getElementById('frame' + frame.replace('h','h').replace('m','m'));
-  if (active) { active.style.borderColor='var(--accent)'; active.style.background='rgba(59,130,246,.15)'; active.style.color='var(--accent2)'; }
+  var active = document.getElementById('frame' + frame);
+  if (active) {
+    active.style.borderColor = 'var(--accent)';
+    active.style.background  = 'rgba(59,130,246,.15)';
+    active.style.color       = 'var(--accent2)';
+  }
   updatePctChange();
 }
 
-// Fetch only current price — runs every 1 second
 function livePx() {
   fetch('https://api.binance.com/api/v3/ticker/price?symbol=' + BSYMS[currentCoin])
     .then(function(r) { return r.json(); })
     .then(function(d) {
       lastPrice = parseFloat(d.price);
       var dec = lastPrice < 1 ? 6 : lastPrice < 100 ? 4 : 2;
-      document.getElementById('livePrice').textContent = '$' + lastPrice.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
+      document.getElementById('livePrice').textContent = '$' + lastPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:dec});
       document.getElementById('priceLabel').textContent = currentCoin + ' / USDT';
     }).catch(function(){});
 }
 
-// Fetch % change
 function updatePctChange() {
   var el = document.getElementById('priceChange');
   if (el) el.textContent = '...';
 
   if (priceFrame === '24h') {
-    // Use Binance 24hr ticker - proven, standard endpoint
     fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=' + BSYMS[currentCoin])
       .then(function(r) { return r.json(); })
       .then(function(d) {
@@ -422,7 +387,6 @@ function updatePctChange() {
         }
       }).catch(function(){});
   } else {
-    // Use 1m klines for 15m and 1h
     var minutes = priceFrame === '15m' ? 16 : 61;
     fetch('https://api.binance.com/api/v3/klines?symbol=' + BSYMS[currentCoin] + '&interval=1m&limit=' + minutes)
       .then(function(r) { return r.json(); })
@@ -440,6 +404,35 @@ function updatePctChange() {
   }
 }
 
+function startTimer() {
+  if (timerInterval) return;
+  timerStartedAt = Date.now();
+  timerInterval = setInterval(function() {
+    var prog    = statusData.progress && statusData.progress[currentCoin];
+    var te      = document.getElementById('timerDisplay');
+    var tr      = document.getElementById('timerRemaining');
+    var pf      = document.getElementById('progFill');
+    var elapsed = Math.floor((Date.now() - timerStartedAt) / 1000);
+    var em = String(Math.floor(elapsed/60)).padStart(2,'0');
+    var es = String(elapsed%60).padStart(2,'0');
+    if (te) te.textContent = em + ':' + es + ' elapsed';
+    if (prog && prog.total > 0) {
+      var remSecs = Math.max(0, prog.remaining_secs);
+      var rm = String(Math.floor(remSecs/60)).padStart(2,'0');
+      var rs = String(Math.floor(remSecs%60)).padStart(2,'0');
+      if (tr) tr.textContent = 'MC ' + prog.current + '/' + prog.total + ' | ' + prog.secs_per_run.toFixed(1) + 's/run | ~' + rm + ':' + rs + ' remaining';
+      if (pf) pf.style.width = prog.pct + '%';
+    } else {
+      if (tr) tr.textContent = 'Fetching data & preparing...';
+      if (pf) pf.style.width = '3%';
+    }
+  }, 1000);
+}
+
+function stopTimer() {
+  if (timerInterval) { clearInterval(timerInterval); timerInterval = null; timerStartedAt = null; }
+}
+
 function checkStatus() {
   fetch(BASE + '/status')
     .then(function(r) { return r.json(); })
@@ -447,16 +440,16 @@ function checkStatus() {
       statusData = d;
       var el = document.getElementById('statusRow');
       if (d.model_ready) {
-        var dev = d.device === 'directml' ? '⚡ Intel Arc GPU' : d.device === 'cuda' ? '⚡ NVIDIA GPU' : '💻 CPU';
-        el.innerHTML = '<span>✅</span><span>Kronos-base ready . ' + dev + ' . N=' + (d.monte_carlo_n||100) + '</span>';
+        var dev = d.device === 'directml' ? 'Intel Arc GPU' : d.device === 'cuda' ? 'NVIDIA GPU' : 'CPU';
+        el.innerHTML = '<span>OK</span><span>Kronos-base ready . ' + dev + ' . N=' + (d.monte_carlo_n||100) + '</span>';
         var sub = document.getElementById('headerSub');
         if (sub) sub.textContent = 'Kronos-base . 102M . N=' + (d.monte_carlo_n||100) + ' . ' + dev + ' . Manual refresh';
         updateCoinButtons();
         showCoinState();
       } else if (d.model_error) {
-        el.innerHTML = '<span>❌</span><span>' + d.model_error + '</span>';
+        el.innerHTML = '<span>ERR</span><span>' + d.model_error + '</span>';
       } else {
-        el.innerHTML = '<span>⏳</span><span>Loading Kronos-base...</span>';
+        el.innerHTML = '<span>...</span><span>Loading Kronos-base...</span>';
         setTimeout(checkStatus, 8000);
       }
     }).catch(function() { setTimeout(checkStatus, 10000); });
@@ -470,13 +463,8 @@ function updateCoinButtons() {
     if (c === currentCoin) btn.classList.add('active');
     if (statusData.cached && statusData.cached.indexOf(c) >= 0) {
       btn.classList.add('cached');
-      // Show age if we have it in cache
-      var coinCache = statusData.coin_ages && statusData.coin_ages[c];
-      if (coinCache) {
-        btn.innerHTML = c + '<br><span style="font-size:9px;opacity:0.7">' + coinCache + '</span>';
-      } else {
-        btn.textContent = c;
-      }
+      var age = statusData.coin_ages && statusData.coin_ages[c];
+      btn.innerHTML = c + (age ? '<br><span style="font-size:9px;opacity:0.7">' + age + '</span>' : '');
     } else {
       btn.textContent = c;
     }
@@ -487,11 +475,10 @@ function updateCoinButtons() {
 function selectCoin(coin) {
   currentCoin = coin;
   updateCoinButtons();
-  // Clear old % immediately so stale value doesn't show
   var el = document.getElementById('priceChange');
   if (el) el.textContent = '...';
   livePx();
-  updatePctChange(); // fetch fresh % for new coin immediately
+  updatePctChange();
   if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
   showCoinState();
 }
@@ -547,7 +534,7 @@ function loadCache() {
 
 function startPrediction() {
   var btn = document.getElementById('btnStart');
-  if (btn) { btn.textContent = '⏳ Queuing...'; btn.disabled = true; }
+  if (btn) { btn.textContent = 'Queuing...'; btn.disabled = true; }
   fetch(BASE + '/predict/' + currentCoin)
     .then(function(r) { return r.json(); })
     .then(function(d) {
@@ -564,7 +551,7 @@ function startPrediction() {
       startTimer();
       startPolling();
     }).catch(function() {
-      if (btn) { btn.textContent = '❌ Error - try again'; btn.disabled = false; }
+      if (btn) { btn.textContent = 'Error - try again'; btn.disabled = false; }
     });
 }
 
@@ -579,27 +566,47 @@ function showResults(d) {
   if (d.is_running) rb.classList.remove('hidden');
   else rb.classList.add('hidden');
 
+  // Staleness
   var ageText = '';
   if (d.age_minutes !== undefined) {
     ageText = d.age_minutes < 1 ? ' . Just updated' :
               d.age_minutes === 1 ? ' . 1 min ago' : ' . ' + d.age_minutes + ' min ago';
     if (d.next_refresh_mins > 0) ageText += ' . refresh in ' + d.next_refresh_mins + 'min';
   }
-  var staleHtml = d.is_stale ? ' <span class="stale-warn">⚠️ Stale</span>' : '';
+  var staleHtml = d.is_stale ? ' <span class="stale-warn">STALE</span>' : '';
   document.getElementById('updatedTime').innerHTML =
     'Last updated: ' + new Date(d.updated_at).toLocaleString() + ageText + staleHtml;
 
-  var db = document.getElementById('deviceBadge');
-  var gb = document.getElementById('gpuBadge');
-  if (d.device && d.device !== 'cpu') {
-    gb.style.display = 'inline-flex';
-    gb.textContent = d.device === 'directml' ? '⚡ Intel Arc GPU' : '⚡ NVIDIA GPU';
-  }
-  if (db) {
-    var lookback = d.lookback_used || d.lookback || 384;
-    db.textContent = '🧠 Kronos-base . 102.3M . N=' + (d.monte_carlo_n||100) + ' . T=0.7 . Lookback=' + lookback + 'h';
+  // Advisory Trade Signal (#6 softened)
+  var sc = d.signal_context || {};
+  var sig = sc.trade_signal || 'NO_TRADE';
+  var tradeCard = document.getElementById('tradeCard');
+  var tradeSignalEl = document.getElementById('tradeSignal');
+  var tradeReasonEl = document.getElementById('tradeReason');
+  tradeCard.className = sig === 'LONG' ? 'trade-card-long' :
+                        sig === 'SHORT' ? 'trade-card-short' : 'trade-card-none';
+  tradeSignalEl.textContent = sig === 'LONG' ? 'LONG' : sig === 'SHORT' ? 'SHORT' : 'NO TRADE';
+  tradeSignalEl.style.color = sig === 'LONG' ? 'var(--green)' :
+                               sig === 'SHORT' ? 'var(--red)' : 'var(--muted2)';
+  if (sig === 'NO_TRADE') {
+    tradeReasonEl.textContent = 'Insufficient edge - Kronos < 60%/>40% and/or conflicting signals';
+    tradeReasonEl.style.color = 'var(--muted2)';
+  } else {
+    tradeReasonEl.textContent = 'Kronos ' + (d.upside_prob||0) + '% + ' + (sc.n_confirm||0) + ' confirmations + 0 warnings';
+    tradeReasonEl.style.color = 'var(--muted2)';
   }
 
+  // Regime badge (#8)
+  var regime = sc.regime || (d.indicators && d.indicators.regime) || 'Unknown';
+  var adx    = sc.adx    || (d.indicators && d.indicators.adx) || 0;
+  var regimeEl = document.getElementById('regimeBadge');
+  if (regimeEl) {
+    regimeEl.textContent = regime + ' (ADX ' + adx.toFixed(0) + ')';
+    regimeEl.className = regime === 'Trending' ? 'regime-badge-trending' :
+                         regime === 'Choppy'   ? 'regime-badge-choppy' : 'regime-badge-weak';
+  }
+
+  // Upside prob
   var up = d.upside_prob;
   var uEl = document.getElementById('upsideVal');
   uEl.textContent = up.toFixed(1) + '%';
@@ -608,47 +615,47 @@ function showResults(d) {
   bar.style.width = up + '%';
   bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)';
 
+  // Confidence
   var conf = d.confidence || 50;
   var confEl = document.getElementById('confidenceVal');
   confEl.textContent = conf.toFixed(0) + '%';
   confEl.className = 'metric-value ' + (conf >= 70 ? 'up' : conf >= 40 ? 'warn' : 'down');
 
+  // Historical accuracy
   if (d.accuracy && d.accuracy.total > 0) {
     document.getElementById('accuracyBox').classList.remove('hidden');
     var accEl = document.getElementById('accuracyVal');
     accEl.textContent = d.accuracy.pct + '%';
     accEl.style.color = d.accuracy.pct >= 55 ? 'var(--green)' : d.accuracy.pct >= 45 ? 'var(--orange)' : 'var(--red)';
     document.getElementById('accuracyCount').textContent =
-      d.accuracy.correct + ' correct out of ' + d.accuracy.total + ' predictions tracked';
+      d.accuracy.correct + ' correct out of ' + d.accuracy.total + ' tracked';
   }
 
-  if (d.signal_context) {
-    var sc = d.signal_context;
-    var sumEl = document.getElementById('contextSummary');
-
-    if (d.hallucinating) {
-      sumEl.innerHTML = '<span style="color:var(--red);font-weight:700">⚠ Model Hallucinating Certainty</span><br>' +
-        '<span style="font-size:11px;color:var(--muted2)">Predicted range is tighter than historical volatility. Confidence has been reduced. Do not trust extreme upside/downside readings.</span>';
-    } else {
-      sumEl.textContent = sc.context;
-      sumEl.style.color = sc.n_confirm > sc.n_warn ? 'var(--green)' :
-                          sc.n_warn > sc.n_confirm ? 'var(--orange)' : 'var(--muted2)';
-    }
-    var cDiv = document.getElementById('confirmations');
-    cDiv.innerHTML = '';
-    (sc.confirmations || []).forEach(function(c) {
-      cDiv.innerHTML += '<div class="context-item"><span style="color:var(--green)">✓</span><span>' + c + '</span></div>';
-    });
-    var wDiv = document.getElementById('warnings');
-    wDiv.innerHTML = '';
-    (sc.warnings || []).forEach(function(w) {
-      wDiv.innerHTML += '<div class="context-item"><span style="color:var(--orange)">⚠</span><span>' + w + '</span></div>';
-    });
-    if (!sc.confirmations.length && !sc.warnings.length) {
-      cDiv.innerHTML = '<div class="context-item"><span style="color:var(--muted2)">-</span><span style="color:var(--muted2)">No strong auxiliary signals</span></div>';
-    }
+  // Hallucination warning
+  var sumEl = document.getElementById('contextSummary');
+  if (d.hallucinating) {
+    sumEl.innerHTML = '<span style="color:var(--red);font-weight:700">Model Hallucinating Certainty</span><br>' +
+      '<span style="font-size:11px;color:var(--muted2)">Predicted range tighter than historical volatility. Do not trust extreme readings.</span>';
+  } else {
+    sumEl.textContent = sc.context || '-';
+    sumEl.style.color = (sc.n_confirm||0) > (sc.n_warn||0) ? 'var(--green)' :
+                        (sc.n_warn||0) > (sc.n_confirm||0) ? 'var(--orange)' : 'var(--muted2)';
+  }
+  var cDiv = document.getElementById('confirmations');
+  cDiv.innerHTML = '';
+  (sc.confirmations || []).forEach(function(c) {
+    cDiv.innerHTML += '<div class="context-item"><span style="color:var(--green)">OK</span><span>' + c + '</span></div>';
+  });
+  var wDiv = document.getElementById('warnings');
+  wDiv.innerHTML = '';
+  (sc.warnings || []).forEach(function(w) {
+    wDiv.innerHTML += '<div class="context-item"><span style="color:var(--orange)">!</span><span>' + w + '</span></div>';
+  });
+  if (!(sc.confirmations||[]).length && !(sc.warnings||[]).length) {
+    cDiv.innerHTML = '<div class="context-item"><span style="color:var(--muted2)">-</span><span style="color:var(--muted2)">No strong auxiliary signals</span></div>';
   }
 
+  // Price target
   var fc = d.forecast;
   var lastMean = fc.mean_close[fc.mean_close.length-1];
   var lastHigh = fc.upper[fc.upper.length-1];
@@ -658,9 +665,10 @@ function showResults(d) {
   var cEl = document.getElementById('targetChange');
   cEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '% vs current';
   cEl.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
-  document.getElementById('tHigh').textContent = '▲ ' + fmt(lastHigh);
-  document.getElementById('tLow').textContent  = '▼ ' + fmt(lastLow);
+  document.getElementById('tHigh').textContent = 'P90: ' + fmt(lastHigh);
+  document.getElementById('tLow').textContent  = 'P10: ' + fmt(lastLow);
 
+  // Technical indicators
   if (d.indicators) {
     var ind = d.indicators;
     var rsi = ind.rsi;
@@ -669,7 +677,7 @@ function showResults(d) {
     rsiEl.className = 'ind-val ' + (rsi < 30 ? 'up' : rsi > 70 ? 'down' : 'warn');
     var mh = ind.macd_hist;
     var macdEl = document.getElementById('macdVal');
-    macdEl.textContent = mh >= 0 ? '▲ Bull' : '▼ Bear';
+    macdEl.textContent = mh >= 0 ? 'Bull' : 'Bear';
     macdEl.className = 'ind-val ' + (mh >= 0 ? 'up' : 'down');
     var bb = ind.bb_pct * 100;
     var bbEl = document.getElementById('bbVal');
@@ -680,8 +688,15 @@ function showResults(d) {
     vrEl.textContent = vr.toFixed(2) + 'x';
     vrEl.className = 'ind-val ' + (!ind.vol_valid ? 'warn' : vr > 1.5 ? 'up' : '');
     document.getElementById('sma20Val').textContent = fmt(ind.sma20);
+    // ADX (#8)
+    var adxEl = document.getElementById('adxVal');
+    if (adxEl && ind.adx !== undefined) {
+      adxEl.textContent = ind.adx.toFixed(0);
+      adxEl.className = 'ind-val ' + (ind.adx >= 25 ? 'up' : ind.adx >= 20 ? 'warn' : 'down');
+    }
   }
 
+  // Fear & Greed
   if (d.fear_greed && d.fear_greed.value !== undefined && d.fear_greed.value !== null) {
     var fg = d.fear_greed;
     var fgEl = document.getElementById('fgVal');
@@ -693,6 +708,7 @@ function showResults(d) {
     fgEl.className = 'ind-val';
   }
 
+  // Crypto-native signals
   if (d.funding) {
     var fundEl = document.getElementById('fundingVal');
     fundEl.textContent = d.funding.rate !== null ? (d.funding.rate.toFixed(3) + '% . ' + d.funding.label) : 'N/A';
@@ -717,6 +733,18 @@ function showResults(d) {
     document.getElementById('domVal').textContent = d.btc_dominance.toFixed(1) + '%';
   }
 
+  // Device badge
+  var db = document.getElementById('deviceBadge');
+  var gb = document.getElementById('gpuBadge');
+  if (d.device && d.device !== 'cpu') {
+    gb.style.display = 'inline-flex';
+    gb.textContent = d.device === 'directml' ? 'Intel Arc GPU' : 'NVIDIA GPU';
+  }
+  if (db) {
+    var lookback = d.lookback_used || d.lookback || 384;
+    db.textContent = 'Kronos-base . 102.3M . N=' + (d.monte_carlo_n||100) + ' . T=0.7+Greedy . Lookback=' + lookback + 'h';
+  }
+
   drawChart(d);
   buildTable(d);
 }
@@ -731,14 +759,12 @@ function buildTable(d) {
     var m = fc.mean_close[i], hi = fc.upper[i], lo = fc.lower[i];
     var chg = ((m - d.last_price) / d.last_price * 100);
     var tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td><span class="hbadge">+' + (i+1) + 'h</span></td>' +
+    tr.innerHTML = '<td><span class="hbadge">+' + (i+1) + 'h</span></td>' +
       '<td style="font-weight:600;color:' + (chg>=0?'var(--green)':'var(--red)') + '">' +
-        fmt(m) + '<span style="font-size:10px;color:var(--muted2)">&nbsp;' +
-        (chg>=0?'+':'') + chg.toFixed(1) + '%</span></td>' +
+        fmt(m) + '<span style="font-size:10px;color:var(--muted2)">&nbsp;' + (chg>=0?'+':'') + chg.toFixed(1) + '%</span></td>' +
       '<td style="font-size:11px;text-align:right">' +
-        '<span style="color:var(--green)">▲' + fmt(hi) + '</span><br>' +
-        '<span style="color:var(--red)">▼' + fmt(lo) + '</span></td>';
+        '<span style="color:var(--green)">' + fmt(hi) + '</span><br>' +
+        '<span style="color:var(--red)">' + fmt(lo) + '</span></td>';
     tb.appendChild(tr);
   });
 }
@@ -765,58 +791,51 @@ function drawChart(d) {
   var hl = hist.length;
 
   ctx.beginPath();
-  fu.forEach(function(v, i) { var x=xP(hl-1+i), y=yP(v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-  fl.slice().reverse().forEach(function(v, i) { var idx=fl.length-1-i; ctx.lineTo(xP(hl-1+idx), yP(v)); });
+  fu.forEach(function(v,i){ var x=xP(hl-1+i),y=yP(v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+  fl.slice().reverse().forEach(function(v,i){ var idx=fl.length-1-i; ctx.lineTo(xP(hl-1+idx),yP(v)); });
   ctx.closePath();
-  ctx.fillStyle = 'rgba(245,158,11,.15)';
+  ctx.fillStyle='rgba(245,158,11,.15)';
   ctx.fill();
 
   ctx.beginPath();
-  hist.forEach(function(v, i) { var x=xP(i), y=yP(v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-  ctx.strokeStyle = '#60a5fa'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.stroke();
+  hist.forEach(function(v,i){ var x=xP(i),y=yP(v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+  ctx.strokeStyle='#60a5fa';ctx.lineWidth=2;ctx.lineJoin='round';ctx.stroke();
 
   ctx.beginPath();
-  fm.forEach(function(v, i) { var x=xP(hl-1+i), y=yP(i===0?hist[hist.length-1]:v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
-  ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2; ctx.setLineDash([5,3]); ctx.stroke(); ctx.setLineDash([]);
+  fm.forEach(function(v,i){ var x=xP(hl-1+i),y=yP(i===0?hist[hist.length-1]:v); i===0?ctx.moveTo(x,y):ctx.lineTo(x,y); });
+  ctx.strokeStyle='#f59e0b';ctx.lineWidth=2;ctx.setLineDash([5,3]);ctx.stroke();ctx.setLineDash([]);
 
-  var nx = xP(hl - 1);
-  ctx.beginPath(); ctx.moveTo(nx, p.t); ctx.lineTo(nx, H - p.b);
-  ctx.strokeStyle = 'rgba(255,255,255,.15)'; ctx.lineWidth = 1; ctx.setLineDash([3,3]); ctx.stroke(); ctx.setLineDash([]);
+  var nx = xP(hl-1);
+  ctx.beginPath();ctx.moveTo(nx,p.t);ctx.lineTo(nx,H-p.b);
+  ctx.strokeStyle='rgba(255,255,255,.15)';ctx.lineWidth=1;ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([]);
 
-  ctx.font = '9px -apple-system,sans-serif';
-  ctx.fillStyle = 'rgba(100,116,139,.9)'; ctx.fillText('History', p.l+4, H-p.b+13);
-  ctx.fillStyle = 'rgba(245,158,11,.9)'; ctx.fillText('Forecast', nx+4, H-p.b+13);
+  ctx.font='9px -apple-system,sans-serif';
+  ctx.fillStyle='rgba(100,116,139,.9)';ctx.fillText('History',p.l+4,H-p.b+13);
+  ctx.fillStyle='rgba(245,158,11,.9)';ctx.fillText('Forecast',nx+4,H-p.b+13);
 }
 
 function refreshAll() {
   var btn = document.getElementById('btn-all');
-  if (btn) { btn.textContent = '⏳ Queuing...'; btn.style.pointerEvents = 'none'; }
+  if (btn) { btn.textContent = 'Queuing...'; btn.style.pointerEvents = 'none'; }
   var queued = 0;
   COINS.forEach(function(c, i) {
     setTimeout(function() {
       fetch(BASE + '/predict/' + c)
         .then(function(r) { return r.json(); })
-        .then(function(d) {
+        .then(function() {
           queued++;
           if (queued === COINS.length) {
-            if (btn) { btn.innerHTML = '⚡ All'; btn.style.pointerEvents = 'auto'; }
-            // Switch to BTC and start timer so user sees progress
+            if (btn) { btn.innerHTML = 'All'; btn.style.pointerEvents = 'auto'; }
             selectCoin('BTC');
             fetch(BASE + '/status')
               .then(function(r2) { return r2.json(); })
               .then(function(s) { statusData = s; updateCoinButtons(); showCoinState(); })
               .catch(function(){});
           }
-        }).catch(function() {});
+        }).catch(function(){});
     }, i * 300);
   });
 }
-
-livePx();
-updatePctChange();
-setInterval(livePx, 1000);
-setInterval(updatePctChange, 10000);
-checkStatus();
 
 function openDrawer() {
   document.getElementById('drawer').classList.add('open');
@@ -836,32 +855,65 @@ function loadAccuracy() {
       var el = document.getElementById('accuracyList');
       var byCoin = data.by_coin || {};
       var byConf = data.by_confidence || {};
+      var baselines = data.baselines || {};
+      var bandStats = data.band_stats || {};
       var keys = Object.keys(byCoin);
 
       if (keys.length === 0) {
-        el.innerHTML = '<div class="acc-empty">🕐 No accuracy data yet.<br><br>After 24 hours, the app automatically checks whether each prediction was correct and logs it here.<br><br>Check back tomorrow.</div>';
+        el.innerHTML = '<div class="acc-empty">No accuracy data yet.<br><br>After 24 hours, predictions are checked automatically.<br><br>Check back tomorrow.</div>';
         return;
       }
 
-      var totalAll = keys.reduce(function(s,k){return s+byCoin[k].total;}, 0);
-      var correctAll = keys.reduce(function(s,k){return s+byCoin[k].correct;}, 0);
+      var totalAll   = keys.reduce(function(s,k){return s+byCoin[k].total;},0);
+      var correctAll = keys.reduce(function(s,k){return s+byCoin[k].correct;},0);
       var overallPct = totalAll > 0 ? (correctAll/totalAll*100).toFixed(1) : '-';
       var overallColor = parseFloat(overallPct) >= 55 ? 'var(--green)' : parseFloat(overallPct) >= 45 ? 'var(--orange)' : 'var(--red)';
 
       var html = '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;text-align:center">' +
-        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Overall Directional Accuracy</div>' +
+        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Overall Kronos Accuracy</div>' +
         '<div style="font-size:36px;font-weight:800;color:' + overallColor + '">' + overallPct + '%</div>' +
         '<div style="font-size:12px;color:var(--muted2);margin-top:4px">' + correctAll + ' correct out of ' + totalAll + ' predictions</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% . Good model ≥ 55%</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% . Good model >= 55%</div>' +
       '</div>';
 
-      var confKeys = ['high', 'medium', 'low'];
-      var confLabels = {high: '🟢 High Confidence (≥80%)', medium: '🟡 Medium (60–80%)', low: '🔴 Low (<60%)'};
+      // Baseline comparison (#5)
+      if (baselines.total > 0) {
+        html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">';
+        html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Baseline Comparison</div>';
+        var rows = [
+          ['Kronos', baselines.kronos_pct, 'var(--accent2)'],
+          ['Momentum', baselines.momentum_pct, 'var(--muted2)'],
+          ['Carry', baselines.carry_pct, 'var(--muted2)'],
+        ];
+        rows.forEach(function(row) {
+          if (row[1] === null || row[1] === undefined) return;
+          var pct = row[1];
+          var col = parseFloat(pct) >= 55 ? 'var(--green)' : parseFloat(pct) >= 45 ? 'var(--orange)' : 'var(--red)';
+          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-top:1px solid var(--border)">' +
+            '<span style="font-size:13px;color:' + row[2] + '">' + row[0] + '</span>' +
+            '<span style="font-size:16px;font-weight:800;color:' + col + '">' + pct + '%</span></div>';
+        });
+        html += '</div>';
+      }
+
+      // P10-P90 band hit rate (#4)
+      if (bandStats.total > 0) {
+        var bandCol = bandStats.pct >= 75 ? 'var(--green)' : bandStats.pct >= 60 ? 'var(--orange)' : 'var(--red)';
+        html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px;text-align:center">';
+        html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">P10-P90 Band Hit Rate</div>';
+        html += '<div style="font-size:28px;font-weight:800;color:' + bandCol + '">' + bandStats.pct + '%</div>';
+        html += '<div style="font-size:12px;color:var(--muted2);margin-top:4px">Price landed inside forecast band ' + bandStats.hits + '/' + bandStats.total + ' times</div>';
+        html += '<div style="font-size:11px;color:var(--muted);margin-top:6px">Good calibration >= 80%</div>';
+        html += '</div>';
+      }
+
+      // Confidence buckets
+      var confKeys = ['high','medium','low'];
+      var confLabels = {high:'High Confidence (>=80%)',medium:'Medium (60-80%)',low:'Low (<60%)'};
       var hasConf = confKeys.some(function(k){ return byConf[k]; });
       if (hasConf) {
         html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">';
-        html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Accuracy by Confidence Level</div>';
-        html += '<div style="font-size:11px;color:var(--muted2);margin-bottom:8px">Does high model confidence = more accurate? Find out here.</div>';
+        html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Accuracy by Confidence</div>';
         confKeys.forEach(function(k) {
           var b = byConf[k];
           if (!b) return;
@@ -869,33 +921,29 @@ function loadAccuracy() {
           html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--border)">' +
             '<div><div style="font-size:12px;font-weight:600">' + confLabels[k] + '</div>' +
             '<div style="font-size:11px;color:var(--muted2)">' + b.correct + '/' + b.total + ' correct</div></div>' +
-            '<div style="font-size:18px;font-weight:800;color:' + bColor + '">' + b.pct + '%</div>' +
-          '</div>';
+            '<div style="font-size:18px;font-weight:800;color:' + bColor + '">' + b.pct + '%</div></div>';
         });
         html += '</div>';
       }
 
+      // Per-coin
       html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">By Coin</div>';
       keys.sort(function(a,b){ return byCoin[b].total - byCoin[a].total; });
       keys.forEach(function(sym) {
-        var d = byCoin[sym];
-        var pct = d.pct;
+        var d2 = byCoin[sym];
+        var pct = d2.pct;
         var color = pct >= 60 ? 'var(--green)' : pct >= 45 ? 'var(--orange)' : 'var(--red)';
         html += '<div class="acc-row">' +
-          '<div>' +
-            '<div class="acc-symbol">' + sym + '/USDT</div>' +
-            '<div style="font-size:11px;color:var(--muted2);margin-top:2px">' + d.correct + ' correct of ' + d.total + ' tracked</div>' +
-            '<div class="acc-bar-bg"><div class="acc-bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div>' +
-          '</div>' +
-          '<div class="acc-stats">' +
-            '<div class="acc-pct" style="color:' + color + '">' + pct + '%</div>' +
-            '<div class="acc-count">Direction<br>accuracy</div>' +
-          '</div>' +
-        '</div>';
+          '<div><div class="acc-symbol">' + sym + '/USDT</div>' +
+          '<div style="font-size:11px;color:var(--muted2);margin-top:2px">' + d2.correct + ' correct of ' + d2.total + ' tracked</div>' +
+          '<div class="acc-bar-bg"><div class="acc-bar-fill" style="width:' + pct + '%;background:' + color + '"></div></div></div>' +
+          '<div class="acc-stats"><div class="acc-pct" style="color:' + color + '">' + pct + '%</div>' +
+          '<div class="acc-count">Direction<br>accuracy</div></div></div>';
       });
 
       el.innerHTML = html;
 
+      // Update info panel
       if (statusData.device) {
         var devEl = document.getElementById('infoDevice');
         if (devEl) devEl.textContent = statusData.device === 'directml' ? 'Intel Arc (CPU-bound)' :
@@ -905,7 +953,6 @@ function loadAccuracy() {
         var nEl = document.getElementById('infoN');
         if (nEl) nEl.textContent = statusData.monte_carlo_n;
       }
-      // Show request count
       if (statusData.requests_24h) {
         var reqEl = document.getElementById('infoRequests');
         if (reqEl) {
@@ -914,11 +961,16 @@ function loadAccuracy() {
           reqEl.textContent = r.total_24h + ' total' + (byCoins ? ' (' + byCoins + ')' : '');
         }
       }
-    }).catch(function(e) {
-      document.getElementById('accuracyList').innerHTML =
-        '<div class="acc-empty">⚠️ Could not load accuracy data.</div>';
+    }).catch(function() {
+      document.getElementById('accuracyList').innerHTML = '<div class="acc-empty">Could not load accuracy data.</div>';
     });
 }
+
+livePx();
+updatePctChange();
+setInterval(livePx, 1000);
+setInterval(updatePctChange, 10000);
+checkStatus();
 </script>
 </body>
 </html>

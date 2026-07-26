@@ -116,6 +116,7 @@ def init_db():
         "ALTER TABLE accuracy ADD COLUMN carry_direction INTEGER",
         "ALTER TABLE accuracy ADD COLUMN inside_band INTEGER",
         "ALTER TABLE accuracy ADD COLUMN momentum_correct INTEGER",
+        "ALTER TABLE accuracy ADD COLUMN carry_correct INTEGER",
         "ALTER TABLE accuracy ADD COLUMN random_walk_correct INTEGER",
     ]
     for sql in migrations:

@@ -184,7 +184,8 @@ canvas{width:100%!important;height:100%!important}
     </div>
     <div style="margin-top:4px;display:flex;gap:4px">
       <button onclick="setPriceFrame('15m')" id="frame15m" style="font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--border);background:var(--card2);color:var(--muted2);cursor:pointer">15m</button>
-      <button onclick="setPriceFrame('1h')" id="frame1h" style="font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--accent);background:rgba(59,130,246,.15);color:var(--accent2);cursor:pointer">1h</button>
+      <button onclick="setPriceFrame('1h')" id="frame1h" style="font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--border);background:var(--card2);color:var(--muted2);cursor:pointer">1h</button>
+      <button onclick="setPriceFrame('24h')" id="frame24h" style="font-size:10px;padding:2px 7px;border-radius:99px;border:1px solid var(--accent);background:rgba(59,130,246,.15);color:var(--accent2);cursor:pointer">24h</button>
     </div>
   </div>
   <div style="display:flex;align-items:center;gap:10px">
@@ -376,20 +377,17 @@ function fmt(v) {
   return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
 }
 
-var priceFrame = '1h';
+var priceFrame = '24h';
 var lastPrice = 0;
 
 function setPriceFrame(frame) {
   priceFrame = frame;
-  var f15 = document.getElementById('frame15m');
-  var f1h = document.getElementById('frame1h');
-  if (frame === '15m') {
-    f15.style.borderColor = 'var(--accent)'; f15.style.background = 'rgba(59,130,246,.15)'; f15.style.color = 'var(--accent2)';
-    f1h.style.borderColor = 'var(--border)';  f1h.style.background = 'var(--card2)';          f1h.style.color = 'var(--muted2)';
-  } else {
-    f1h.style.borderColor = 'var(--accent)'; f1h.style.background = 'rgba(59,130,246,.15)'; f1h.style.color = 'var(--accent2)';
-    f15.style.borderColor = 'var(--border)'; f15.style.background = 'var(--card2)';          f15.style.color = 'var(--muted2)';
-  }
+  ['frame15m','frame1h','frame24h'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) { el.style.borderColor='var(--border)'; el.style.background='var(--card2)'; el.style.color='var(--muted2)'; }
+  });
+  var active = document.getElementById('frame' + frame.replace('h','h').replace('m','m'));
+  if (active) { active.style.borderColor='var(--accent)'; active.style.background='rgba(59,130,246,.15)'; active.style.color='var(--accent2)'; }
   updatePctChange();
 }
 
@@ -405,23 +403,41 @@ function livePx() {
     }).catch(function(){});
 }
 
-// Fetch % change - gets both past and current price in one call
+// Fetch % change
 function updatePctChange() {
-  var minutes = priceFrame === '15m' ? 16 : 61;
-  fetch('https://api.binance.com/api/v3/klines?symbol=' + BSYMS[currentCoin] + '&interval=1m&limit=' + minutes)
-    .then(function(r) { return r.json(); })
-    .then(function(candles) {
-      if (!candles || candles.length < 2) return;
-      var pastPrice   = parseFloat(candles[0][1]);    // open of oldest candle
-      var currentPrice = parseFloat(candles[candles.length-1][4]); // close of latest candle
-      if (pastPrice <= 0 || currentPrice <= 0) return;
-      var chg = ((currentPrice - pastPrice) / pastPrice * 100);
-      var el = document.getElementById('priceChange');
-      if (el) {
-        el.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
-        el.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
-      }
-    }).catch(function(){});
+  var el = document.getElementById('priceChange');
+  if (el) el.textContent = '...';
+
+  if (priceFrame === '24h') {
+    // Use Binance 24hr ticker - proven, standard endpoint
+    fetch('https://api.binance.com/api/v3/ticker/24hr?symbol=' + BSYMS[currentCoin])
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d && d.priceChangePercent !== undefined) {
+          var chg = parseFloat(d.priceChangePercent);
+          if (el) {
+            el.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+            el.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
+          }
+        }
+      }).catch(function(){});
+  } else {
+    // Use 1m klines for 15m and 1h
+    var minutes = priceFrame === '15m' ? 16 : 61;
+    fetch('https://api.binance.com/api/v3/klines?symbol=' + BSYMS[currentCoin] + '&interval=1m&limit=' + minutes)
+      .then(function(r) { return r.json(); })
+      .then(function(candles) {
+        if (!candles || candles.length < 2) return;
+        var pastPrice    = parseFloat(candles[0][1]);
+        var currentPrice = parseFloat(candles[candles.length-1][4]);
+        if (pastPrice <= 0 || currentPrice <= 0) return;
+        var chg = ((currentPrice - pastPrice) / pastPrice * 100);
+        if (el) {
+          el.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '%';
+          el.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
+        }
+      }).catch(function(){});
+  }
 }
 
 function checkStatus() {

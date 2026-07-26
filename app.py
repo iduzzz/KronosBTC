@@ -668,9 +668,10 @@ def circuit_breaker_check(symbol):
     Returns (True, "OK") if safe to trade.
     Returns (False, reason) if circuit is broken.
     Requires minimum 20 overall / 10 per-coin predictions before activating.
+    Also checks last 7 predictions for sudden cold streaks.
     """
     try:
-        stats = get_accuracy_stats()
+        stats     = get_accuracy_stats()
         baselines = stats.get("baselines", {})
         by_coin   = stats.get("by_coin", {})
 
@@ -686,6 +687,19 @@ def circuit_breaker_check(symbol):
         if coin_data.get("total", 0) >= 10:
             if coin_data.get("pct", 50) < 40:
                 return False, f"Circuit broken for {symbol}: accuracy {coin_data['pct']}% over {coin_data['total']} predictions"
+
+        # Recency check: last 7 predictions — catches sudden cold streaks fast
+        with sqlite3.connect(DB_FILE) as conn:
+            recent = conn.execute("""
+                SELECT direction_correct FROM accuracy
+                WHERE symbol=? AND direction_correct IS NOT NULL
+                ORDER BY predicted_at DESC LIMIT 7
+            """, (symbol,)).fetchall()
+
+        if len(recent) >= 5:
+            recent_pct = sum(r[0] for r in recent) / len(recent) * 100
+            if recent_pct < 30:
+                return False, f"Cold streak: {recent_pct:.0f}% over last {len(recent)} predictions for {symbol}"
 
     except Exception as e:
         print(f"[Circuit] Check failed: {e}", flush=True)

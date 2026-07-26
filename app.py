@@ -94,6 +94,7 @@ def init_db():
                 inside_band         INTEGER,
                 momentum_correct    INTEGER,
                 carry_correct       INTEGER,
+                random_walk_correct INTEGER,
                 checked_at          TEXT
             )
         """)
@@ -115,7 +116,7 @@ def init_db():
         "ALTER TABLE accuracy ADD COLUMN carry_direction INTEGER",
         "ALTER TABLE accuracy ADD COLUMN inside_band INTEGER",
         "ALTER TABLE accuracy ADD COLUMN momentum_correct INTEGER",
-        "ALTER TABLE accuracy ADD COLUMN carry_correct INTEGER",
+        "ALTER TABLE accuracy ADD COLUMN random_walk_correct INTEGER",
     ]
     for sql in migrations:
         try:
@@ -228,15 +229,18 @@ def check_accuracy():
                         carry_correct = 1 if (carry_dir == 1 and actual > entry_price) or \
                                             (carry_dir == 0 and actual <= entry_price) else 0
 
+                    # Random Walk baseline: predict price stays flat (correct if <1% move)
+                    rw_correct = 1 if abs(actual - entry_price) / (entry_price + 1e-10) < 0.01 else 0
+
                     with db_lock:
                         with sqlite3.connect(DB_FILE) as conn:
                             conn.execute("""
                                 UPDATE accuracy
                                 SET actual_price=?, direction_correct=?, inside_band=?,
-                                    momentum_correct=?, carry_correct=?, checked_at=?
+                                    momentum_correct=?, carry_correct=?, random_walk_correct=?, checked_at=?
                                 WHERE id=?
                             """, (actual, correct, band_hit, mom_correct, carry_correct,
-                                  datetime.now(timezone.utc).isoformat(), row_id))
+                                  rw_correct, datetime.now(timezone.utc).isoformat(), row_id))
                             conn.commit()
 
                     print(f"[Accuracy] {symbol} entry={entry_price:.2f} actual={actual:.2f} "
@@ -277,7 +281,8 @@ def get_accuracy_stats():
                     COUNT(*) as total,
                     SUM(direction_correct) as kronos_correct,
                     SUM(momentum_correct) as mom_correct,
-                    SUM(carry_correct) as carry_correct
+                    SUM(carry_correct) as carry_correct,
+                    SUM(random_walk_correct) as rw_correct
                 FROM accuracy
                 WHERE direction_correct IS NOT NULL
             """).fetchone()
@@ -309,9 +314,10 @@ def get_accuracy_stats():
             total = base_row[0]
             baselines = {
                 "total": total,
-                "kronos_pct":   round((base_row[1] or 0) / total * 100, 1),
-                "momentum_pct": round((base_row[2] or 0) / total * 100, 1) if base_row[2] is not None else None,
-                "carry_pct":    round((base_row[3] or 0) / total * 100, 1) if base_row[3] is not None else None,
+                "kronos_pct":      round((base_row[1] or 0) / total * 100, 1),
+                "momentum_pct":    round((base_row[2] or 0) / total * 100, 1) if base_row[2] is not None else None,
+                "carry_pct":       round((base_row[3] or 0) / total * 100, 1) if base_row[3] is not None else None,
+                "random_walk_pct": round((base_row[4] or 0) / total * 100, 1) if base_row[4] is not None else None,
             }
 
         band_stats = {}

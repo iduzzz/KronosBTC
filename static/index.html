@@ -918,7 +918,9 @@ function loadAccuracy() {
       var byConf = data.by_confidence || {};
       var baselines = data.baselines || {};
       var bandStats = data.band_stats || {};
-      var keys = Object.keys(byCoin);
+      // Only count active coins in all stats
+      var activeKeys = Object.keys(byCoin).filter(function(k){ return COINS.indexOf(k) >= 0; });
+      var keys = activeKeys;
 
       if (keys.length === 0) {
         el.innerHTML = '<div class="acc-empty">No accuracy data yet.<br><br>After 24 hours, predictions are checked automatically.<br><br>Check back tomorrow.</div>';
@@ -988,8 +990,9 @@ function loadAccuracy() {
         html += '</div>';
       }
 
-      // Per-coin
+      // Per-coin — only show active coins (ZEC, BTC, TAO, ETH)
       html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">By Coin</div>';
+      keys = keys.filter(function(k){ return COINS.indexOf(k) >= 0; });
       keys.sort(function(a,b){ return byCoin[b].total - byCoin[a].total; });
       keys.forEach(function(sym) {
         var d2 = byCoin[sym];

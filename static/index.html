@@ -145,7 +145,13 @@ canvas{width:100%!important;height:100%!important}
     <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">ZEC BTC TAO ETH</span></div>
   </div>
   <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
-    <div class="drawer-section-title">How to Read</div>
+    <div class="drawer-section-title">Capital Settings</div>
+    <div style="font-size:12px;color:var(--muted2);margin-bottom:8px">Used for position sizing calculations only. Not sent anywhere.</div>
+    <input type="number" id="capitalInput" value="10000" min="100" step="100"
+           style="width:100%;padding:10px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:14px">
+    <button onclick="saveCapital()" style="margin-top:8px;width:100%;padding:10px;background:var(--accent);color:white;border:none;border-radius:8px;font-weight:700;cursor:pointer">Save Capital</button>
+    <div id="capitalSaved" style="font-size:11px;color:var(--green);text-align:center;margin-top:6px;display:none">Saved. Refresh a prediction to see updated sizing.</div>
+  </div>
     <div style="font-size:12px;color:var(--muted2);line-height:1.8">
       <div><strong style="color:var(--green)">LONG</strong> -- Kronos >60% bullish + 2 confirmations + 0 warnings</div><br>
       <div><strong style="color:var(--red)">SHORT</strong> -- Kronos <40% bearish + 2 confirmations + 0 warnings</div><br>
@@ -617,10 +623,12 @@ function showResults(d) {
     }
   }
 
-  // Position sizing (advisory)
+  // Position sizing (advisory) — uses saved capital from localStorage
   var psCard = document.getElementById('positionCard');
   if (d.position_size && psCard) {
     var ps = d.position_size;
+    var userCapital = getCapital();
+    var scaledMax = Math.round(userCapital * (ps.size_pct / 100));
     var active = (sig === 'LONG' || sig === 'SHORT');
     psCard.classList.remove('hidden');
     psCard.style.opacity = active ? '1' : '0.4';
@@ -630,7 +638,7 @@ function showResults(d) {
     document.getElementById('psStop').textContent = fmt(ps.stop_loss);
     document.getElementById('psTarget').textContent = fmt(ps.take_profit);
     document.getElementById('psRisk').textContent = ps.risk_pct + '% at risk';
-    document.getElementById('psMax').textContent = '$' + ps.max_position_usd.toLocaleString() + ' (on $' + ps.capital_assumed.toLocaleString() + ' capital)';
+    document.getElementById('psMax').textContent = '$' + scaledMax.toLocaleString() + ' (on $' + userCapital.toLocaleString() + ')';
   }
 
   // Regime badge (#8)
@@ -874,9 +882,25 @@ function refreshAll() {
   });
 }
 
+function saveCapital() {
+  var val = parseInt(document.getElementById('capitalInput').value);
+  if (val >= 100) {
+    localStorage.setItem('kronos_capital', val);
+    var saved = document.getElementById('capitalSaved');
+    if (saved) { saved.style.display = 'block'; setTimeout(function(){ saved.style.display = 'none'; }, 3000); }
+  }
+}
+
+function getCapital() {
+  return parseInt(localStorage.getItem('kronos_capital') || '10000');
+}
+
 function openDrawer() {
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawerOverlay').classList.add('open');
+  // Load saved capital into input
+  var inp = document.getElementById('capitalInput');
+  if (inp) inp.value = getCapital();
   loadAccuracy();
 }
 

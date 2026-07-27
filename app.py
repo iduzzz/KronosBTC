@@ -39,9 +39,9 @@ CORS(app)
 MODEL_NAME     = "NeoQuasar/Kronos-base"
 TOKENIZER_NAME = "NeoQuasar/Kronos-Tokenizer-base"
 LOOKBACK       = 384
-PRED_LEN       = 24
+PRED_LEN       = 12  # Changed to 12 hours for 2-times-a-day schedule
 MONTE_CARLO_N  = 100
-REFRESH_SECS   = 3600
+REFRESH_SECS   = 43200  # 12 hours in seconds
 NUM_WORKERS    = 1
 DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
 
@@ -194,7 +194,7 @@ def save_prediction(symbol, result):
 
 
 def log_paper_trade(symbol, result):
-    """Log paper trade when signal is LONG or SHORT. Auto-closes after 24h."""
+    """Log paper trade when signal is LONG or SHORT. Auto-closes after 12h."""
     try:
         ps  = result.get("position_size")
         sig = result.get("signal_context", {}).get("trade_signal")
@@ -216,14 +216,14 @@ def log_paper_trade(symbol, result):
 
 
 def close_paper_trades():
-    """Close open paper trades: hit stop/target, or auto-close at 24h."""
+    """Close open paper trades: hit stop/target, or auto-close at 12h."""
     try:
         with db_lock:
             with sqlite3.connect(DB_FILE) as conn:
                 open_trades = conn.execute("""
                     SELECT id, symbol, direction, entry_price, stop_price, target_price
                     FROM paper_trades WHERE closed=0
-                    AND predicted_at < datetime('now', '-24 hours')
+                    AND predicted_at < datetime('now', '-12 hours')
                 """).fetchall()
 
         for trade in open_trades:
@@ -231,9 +231,9 @@ def close_paper_trades():
             if sym not in COINS:
                 continue
             try:
-                # Fetch last 24 1h candles — check max high / min low for wick detection
+                # Fetch last 12 1h candles — check max high / min low for wick detection
                 r = requests.get("https://api.binance.com/api/v3/klines",
-                                 params={"symbol": COINS[sym], "interval": "1h", "limit": 24}, timeout=10)
+                                 params={"symbol": COINS[sym], "interval": "1h", "limit": 12}, timeout=10)
                 if not r.ok:
                     continue
                 candles  = r.json()
@@ -298,7 +298,7 @@ def load_cache_from_disk():
 
 
 def check_accuracy():
-    """Compare 24h-old predictions against actual prices."""
+    """Compare 12h-old predictions against actual prices."""
     try:
         with db_lock:
             with sqlite3.connect(DB_FILE) as conn:
@@ -308,7 +308,7 @@ def check_accuracy():
                            momentum_direction, carry_direction
                     FROM accuracy
                     WHERE actual_price IS NULL
-                    AND predicted_at < datetime('now', '-24 hours')
+                    AND predicted_at < datetime('now', '-12 hours')
                 """).fetchall()
 
         for row in rows:
@@ -712,7 +712,7 @@ def find_safe_lookback(df, symbol):
 
 
 # ── Kronos Monte Carlo ─────────────────────────────────────────────────────────
-def kronos_predict(df, symbol="UNK", pred_len=24):
+def kronos_predict(df, symbol="UNK", pred_len=12):
     safe_lookback = find_safe_lookback(df, symbol)
     work_df = df.tail(safe_lookback).reset_index(drop=True)
 
@@ -966,10 +966,10 @@ def run_prediction(symbol):
     last_time  = df["timestamps"].iloc[-1]
 
     # #5: Compute baseline directions before running model
-    # Momentum: last 24h trend continues
+    # Momentum: last 12h trend continues
     try:
-        price_24h_ago  = float(df["close"].iloc[-25]) if len(df) >= 25 else float(df["close"].iloc[0])
-        mom_direction  = 1 if last_price > price_24h_ago else 0
+        price_12h_ago  = float(df["close"].iloc[-13]) if len(df) >= 13 else float(df["close"].iloc[0])
+        mom_direction  = 1 if last_price > price_12h_ago else 0
     except Exception:
         mom_direction = None
 
@@ -1026,19 +1026,19 @@ def run_prediction(symbol):
 
     std_pct      = std / last_price * 100
     hist_vol_pct = float(df["close"].pct_change().dropna().std() * 100)
-    hist_vol_24h = hist_vol_pct * float(np.sqrt(PRED_LEN))
+    hist_vol_12h = hist_vol_pct * float(np.sqrt(PRED_LEN))
     vol_amp_prob = float((std_pct > hist_vol_pct).mean()) * 100
     spread_pct   = (upper - lower) / last_price * 100
     avg_spread   = float(spread_pct.mean())
 
-    if avg_spread < hist_vol_24h:
-        confidence    = round(max(10.0, 50.0 - (hist_vol_24h - avg_spread) * 3), 1)
+    if avg_spread < hist_vol_12h:
+        confidence    = round(max(10.0, 50.0 - (hist_vol_12h - avg_spread) * 3), 1)
         hallucinating = True
     else:
         confidence    = round(max(0.0, 100.0 - avg_spread * 2), 1)
         hallucinating = False
 
-    print(f"[Kronos] {symbol} spread={avg_spread:.2f}% hist_vol_24h={hist_vol_24h:.2f}% "
+    print(f"[Kronos] {symbol} spread={avg_spread:.2f}% hist_vol_12h={hist_vol_12h:.2f}% "
           f"hallucinating={hallucinating} conf={confidence}", flush=True)
 
     signal_context = interpret_signals(

@@ -122,6 +122,14 @@ def init_db():
                 closed_at    TEXT
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS prediction_failures (
+                id        INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol    TEXT NOT NULL,
+                failed_at TEXT NOT NULL,
+                error     TEXT
+            )
+        """)
         conn.commit()
 
     # Migrations for existing databases
@@ -223,24 +231,30 @@ def close_paper_trades():
             if sym not in COINS:
                 continue
             try:
-                r = requests.get("https://api.binance.com/api/v3/ticker/price",
-                                 params={"symbol": COINS[sym]}, timeout=10)
+                # Fetch last 24 1h candles — check max high / min low for wick detection
+                r = requests.get("https://api.binance.com/api/v3/klines",
+                                 params={"symbol": COINS[sym], "interval": "1h", "limit": 24}, timeout=10)
                 if not r.ok:
                     continue
-                current = float(r.json()["price"])
+                candles  = r.json()
+                highs    = [float(c[2]) for c in candles]
+                lows     = [float(c[3]) for c in candles]
+                current  = float(candles[-1][4])
+                max_high = max(highs)
+                min_low  = min(lows)
 
-                # Check stop and target
+                # Check stop and target using actual wick highs/lows
                 if direction == "LONG":
-                    if current <= stop:
+                    if min_low <= stop:
                         exit_reason, exit_price = "STOP_HIT", stop
-                    elif current >= target:
+                    elif max_high >= target:
                         exit_reason, exit_price = "TARGET_HIT", target
                     else:
                         exit_reason, exit_price = "TIME_EXIT", current
                 else:  # SHORT
-                    if current >= stop:
+                    if max_high >= stop:
                         exit_reason, exit_price = "STOP_HIT", stop
-                    elif current <= target:
+                    elif min_low <= target:
                         exit_reason, exit_price = "TARGET_HIT", target
                     else:
                         exit_reason, exit_price = "TIME_EXIT", current
@@ -453,6 +467,17 @@ def worker():
         except Exception as e:
             print(f"[Kronos] {symbol} failed: {e}", flush=True)
             traceback.print_exc()
+            # Log the failure to dedicated table — prevents survivorship bias in accuracy stats
+            try:
+                with db_lock:
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.execute("""
+                            INSERT INTO prediction_failures (symbol, failed_at, error)
+                            VALUES (?, ?, ?)
+                        """, (symbol, datetime.now(timezone.utc).isoformat(), str(e)[:500]))
+                        conn.commit()
+            except Exception as db_e:
+                print(f"[DB] Failed to log prediction failure: {db_e}", flush=True)
         finally:
             running[symbol] = False
         print(f"[Kronos] {symbol} complete. Waiting for next manual request.", flush=True)
@@ -789,12 +814,13 @@ def circuit_breaker_check(symbol):
                 return False, f"Circuit broken for {symbol}: accuracy {coin_data['pct']}% over {coin_data['total']} predictions"
 
         # Recency check: last 7 predictions — catches sudden cold streaks fast
-        with sqlite3.connect(DB_FILE) as conn:
-            recent = conn.execute("""
-                SELECT direction_correct FROM accuracy
-                WHERE symbol=? AND direction_correct IS NOT NULL
-                ORDER BY predicted_at DESC LIMIT 7
-            """, (symbol,)).fetchall()
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                recent = conn.execute("""
+                    SELECT direction_correct FROM accuracy
+                    WHERE symbol=? AND direction_correct IS NOT NULL
+                    ORDER BY predicted_at DESC LIMIT 7
+                """, (symbol,)).fetchall()
 
         if len(recent) >= 5:
             recent_pct = sum(r[0] for r in recent) / len(recent) * 100

@@ -129,6 +129,12 @@ canvas{width:100%!important;height:100%!important}
     <button class="drawer-close" onclick="closeDrawer()">X</button>
   </div>
   <div class="drawer-section">
+    <div class="drawer-section-title">Paper Trading P&L</div>
+    <div id="paperPnlSection">
+      <div class="acc-empty">Loading paper trades...</div>
+    </div>
+  </div>
+  <div class="drawer-section">
     <div class="drawer-section-title">Prediction Accuracy (24h Direction)</div>
     <div id="accuracyList">
       <div class="acc-empty">No accuracy data yet.<br><br>After 24 hours, predictions are checked automatically.<br><br>Check back tomorrow.</div>
@@ -238,7 +244,15 @@ canvas{width:100%!important;height:100%!important}
         <div class="ind-item"><div class="ind-val" id="psStop">-</div><div class="ind-label">Stop Loss (P10)</div></div>
         <div class="ind-item"><div class="ind-val" id="psTarget">-</div><div class="ind-label">Take Profit (1.5x)</div></div>
       </div>
-      <div style="font-size:10px;color:var(--muted);margin-top:8px;text-align:center">Quarter-Kelly formula. This is NOT financial advice. Default capital = $10,000.</div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button id="copyStopBtn" onclick="copyStop()" style="flex:1;padding:8px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;cursor:pointer">Copy Stop Price</button>
+        <button id="copyTargetBtn" onclick="copyTarget()" style="flex:1;padding:8px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;cursor:pointer">Copy Target Price</button>
+      </div>
+      <div id="alertToggle" style="margin-top:8px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted2)">
+        <input type="checkbox" id="priceAlertOn" onchange="toggleAlert()">
+        <label for="priceAlertOn">Alert me when price hits stop loss</label>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:8px;text-align:center">Quarter-Kelly formula. This is NOT financial advice.</div>
     </div>
 
     <!-- Kronos Primary Signal -->
@@ -383,6 +397,7 @@ function livePx() {
       var dec = lastPrice < 1 ? 6 : lastPrice < 100 ? 4 : 2;
       document.getElementById('livePrice').textContent = '$' + lastPrice.toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:dec});
       document.getElementById('priceLabel').textContent = currentCoin + ' / USDT';
+      checkPriceAlert(lastPrice);
     }).catch(function(){});
 }
 
@@ -639,6 +654,10 @@ function showResults(d) {
     document.getElementById('psTarget').textContent = fmt(ps.take_profit);
     document.getElementById('psRisk').textContent = ps.risk_pct + '% at risk';
     document.getElementById('psMax').textContent = '$' + scaledMax.toLocaleString() + ' (on $' + userCapital.toLocaleString() + ')';
+    // Store for clipboard and price alert
+    currentStopPrice   = ps.stop_loss;
+    currentTargetPrice = ps.take_profit;
+    window._lastSignal = sig;
   }
 
   // Regime badge (#8)
@@ -895,12 +914,117 @@ function getCapital() {
   return parseInt(localStorage.getItem('kronos_capital') || '10000');
 }
 
+// Stop/Target copy helpers
+var currentStopPrice = null;
+var currentTargetPrice = null;
+var priceAlertActive = false;
+var alertSoundCtx = null;
+
+function copyStop() {
+  if (currentStopPrice) {
+    navigator.clipboard.writeText(currentStopPrice.toString()).then(function() {
+      var btn = document.getElementById('copyStopBtn');
+      if (btn) { btn.textContent = 'Copied!'; setTimeout(function(){ btn.textContent = 'Copy Stop Price'; }, 2000); }
+    }).catch(function(){});
+  }
+}
+
+function copyTarget() {
+  if (currentTargetPrice) {
+    navigator.clipboard.writeText(currentTargetPrice.toString()).then(function() {
+      var btn = document.getElementById('copyTargetBtn');
+      if (btn) { btn.textContent = 'Copied!'; setTimeout(function(){ btn.textContent = 'Copy Target Price'; }, 2000); }
+    }).catch(function(){});
+  }
+}
+
+function toggleAlert() {
+  priceAlertActive = document.getElementById('priceAlertOn').checked;
+}
+
+function checkPriceAlert(price) {
+  if (!priceAlertActive || !currentStopPrice) return;
+  var sig = (window._lastSignal || '');
+  var triggered = (sig === 'LONG' && price <= currentStopPrice) ||
+                  (sig === 'SHORT' && price >= currentStopPrice);
+  if (triggered) {
+    document.body.style.background = '#3b0000';
+    setTimeout(function(){ document.body.style.background = ''; }, 1000);
+    try {
+      if (!alertSoundCtx) alertSoundCtx = new (window.AudioContext || window.webkitAudioContext)();
+      var osc = alertSoundCtx.createOscillator();
+      osc.connect(alertSoundCtx.destination);
+      osc.frequency.value = 880;
+      osc.start();
+      osc.stop(alertSoundCtx.currentTime + 0.5);
+    } catch(e) {}
+    priceAlertActive = false;
+    var chk = document.getElementById('priceAlertOn');
+    if (chk) chk.checked = false;
+  }
+}
+
+function loadPaperPnl() {
+  fetch(BASE + '/paper_pnl')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var el = document.getElementById('paperPnlSection');
+      if (!el) return;
+
+      var s = data.summary || {};
+      var html = '';
+
+      if (s.total_trades === 0) {
+        html = '<div class="acc-empty">No paper trades yet.<br><br>Paper trades are logged automatically when the app shows a LONG or SHORT signal.</div>';
+      } else {
+        var pnlColor = s.total_pnl_pct >= 0 ? 'var(--green)' : 'var(--red)';
+        var wrColor  = s.win_rate >= 50 ? 'var(--green)' : 'var(--red)';
+        html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">';
+        html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+        html += '<div style="text-align:center"><div style="font-size:22px;font-weight:800;color:' + pnlColor + '">' + (s.total_pnl_pct >= 0 ? '+' : '') + s.total_pnl_pct + '%</div><div style="font-size:10px;color:var(--muted)">Total P&L</div></div>';
+        html += '<div style="text-align:center"><div style="font-size:22px;font-weight:800;color:' + wrColor + '">' + s.win_rate + '%</div><div style="font-size:10px;color:var(--muted)">Win Rate</div></div>';
+        html += '<div style="text-align:center"><div style="font-size:18px;font-weight:700">' + s.total_trades + '</div><div style="font-size:10px;color:var(--muted)">Total Trades</div></div>';
+        html += '<div style="text-align:center"><div style="font-size:18px;font-weight:700;color:' + (s.avg_pnl_pct >= 0 ? 'var(--green)' : 'var(--red)') + '">' + (s.avg_pnl_pct >= 0 ? '+' : '') + s.avg_pnl_pct + '%</div><div style="font-size:10px;color:var(--muted)">Avg P&L</div></div>';
+        html += '</div></div>';
+
+        // Open trades
+        if (data.open && data.open.length > 0) {
+          html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Open Trades</div>';
+          data.open.forEach(function(t) {
+            var col = t.direction === 'LONG' ? 'var(--green)' : 'var(--red)';
+            html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;margin-bottom:6px;display:flex;justify-content:space-between">';
+            html += '<div><div style="font-weight:700;color:' + col + '">' + t.symbol + ' ' + t.direction + '</div>';
+            html += '<div style="font-size:11px;color:var(--muted2)">Entry: $' + t.entry + ' | Stop: $' + t.stop + '</div></div>';
+            html += '<div style="text-align:right;font-size:11px;color:var(--muted2)">Size: ' + t.size_pct + '%</div></div>';
+          });
+        }
+
+        // Recent closed trades
+        if (data.closed && data.closed.length > 0) {
+          html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin:8px 0 6px">Recent Closed</div>';
+          data.closed.slice(0, 5).forEach(function(t) {
+            var pnlCol = t.pnl_pct >= 0 ? 'var(--green)' : 'var(--red)';
+            html += '<div style="display:flex;justify-content:space-between;padding:6px 0;border-top:1px solid var(--border)">';
+            html += '<div><span style="color:' + (t.direction==='LONG'?'var(--green)':'var(--red)') + ';font-weight:600">' + t.symbol + ' ' + t.direction + '</span>';
+            html += ' <span style="font-size:11px;color:var(--muted2)">' + t.reason + '</span></div>';
+            html += '<span style="font-weight:700;color:' + pnlCol + '">' + (t.pnl_pct >= 0 ? '+' : '') + t.pnl_pct + '%</span></div>';
+          });
+        }
+      }
+
+      el.innerHTML = html;
+    }).catch(function() {
+      var el = document.getElementById('paperPnlSection');
+      if (el) el.innerHTML = '<div class="acc-empty">Could not load paper trades.</div>';
+    });
+}
+
 function openDrawer() {
   document.getElementById('drawer').classList.add('open');
   document.getElementById('drawerOverlay').classList.add('open');
-  // Load saved capital into input
   var inp = document.getElementById('capitalInput');
   if (inp) inp.value = getCapital();
+  loadPaperPnl();
   loadAccuracy();
 }
 

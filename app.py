@@ -93,7 +93,7 @@ def init_db():
                 inside_band         INTEGER,
                 momentum_correct    INTEGER,
                 carry_correct       INTEGER,
-                random_walk_correct INTEGER,
+                flat_correct INTEGER,
                 checked_at          TEXT
             )
         """)
@@ -142,7 +142,7 @@ def init_db():
         "ALTER TABLE accuracy ADD COLUMN inside_band INTEGER",
         "ALTER TABLE accuracy ADD COLUMN momentum_correct INTEGER",
         "ALTER TABLE accuracy ADD COLUMN carry_correct INTEGER",
-        "ALTER TABLE accuracy ADD COLUMN random_walk_correct INTEGER",
+        "ALTER TABLE accuracy ADD COLUMN flat_correct INTEGER",
     ]
     for sql in migrations:
         try:
@@ -238,9 +238,18 @@ def close_paper_trades():
                 except Exception:
                     past_24h = False
 
-                # Fetch last 24 1h candles for wick detection
+                # Fetch candles SINCE the trade opened — prevents pre-trade wicks triggering false exits
+                try:
+                    pred_ts = int(datetime.fromisoformat(predicted_at).timestamp() * 1000)
+                except Exception:
+                    pred_ts = None
+
+                klines_params = {"symbol": COINS[sym], "interval": "1h", "limit": 24}
+                if pred_ts:
+                    klines_params["startTime"] = pred_ts
+
                 r = requests.get("https://api.binance.com/api/v3/klines",
-                                 params={"symbol": COINS[sym], "interval": "1h", "limit": 24}, timeout=(3, 10))
+                                 params=klines_params, timeout=(3, 10))
                 if not r.ok:
                     continue
                 candles  = r.json()
@@ -320,7 +329,7 @@ def check_accuracy():
                            momentum_direction, carry_direction
                     FROM accuracy
                     WHERE actual_price IS NULL
-                    AND predicted_at < datetime('now', '-24 hours')
+                    AND datetime(predicted_at) < datetime('now', '-24 hours')
                 """).fetchall()
 
         for row in rows:
@@ -356,17 +365,17 @@ def check_accuracy():
                                             (carry_dir == 0 and actual <= entry_price) else 0
 
                     # Random Walk baseline: predict price stays flat (correct if <1% move)
-                    rw_correct = 1 if abs(actual - entry_price) / (entry_price + 1e-10) < 0.01 else 0
+                    flat_correct = 1 if abs(actual - entry_price) / (entry_price + 1e-10) < 0.01 else 0
 
                     with db_lock:
                         with sqlite3.connect(DB_FILE) as conn:
                             conn.execute("""
                                 UPDATE accuracy
                                 SET actual_price=?, direction_correct=?, inside_band=?,
-                                    momentum_correct=?, carry_correct=?, random_walk_correct=?, checked_at=?
+                                    momentum_correct=?, carry_correct=?, flat_correct=?, checked_at=?
                                 WHERE id=?
                             """, (actual, correct, band_hit, mom_correct, carry_correct,
-                                  rw_correct, datetime.now(timezone.utc).isoformat(), row_id))
+                                  flat_correct, datetime.now(timezone.utc).isoformat(), row_id))
                             conn.commit()
 
                     print(f"[Accuracy] {symbol} entry={entry_price:.2f} actual={actual:.2f} "
@@ -408,7 +417,7 @@ def get_accuracy_stats():
                     SUM(direction_correct) as kronos_correct,
                     SUM(momentum_correct) as mom_correct,
                     SUM(carry_correct) as carry_correct,
-                    SUM(random_walk_correct) as rw_correct
+                    SUM(flat_correct) as flat_correct
                 FROM accuracy
                 WHERE direction_correct IS NOT NULL
             """).fetchone()
@@ -443,7 +452,7 @@ def get_accuracy_stats():
                 "kronos_pct":      round((base_row[1] or 0) / total * 100, 1),
                 "momentum_pct":    round((base_row[2] or 0) / total * 100, 1) if base_row[2] is not None else None,
                 "carry_pct":       round((base_row[3] or 0) / total * 100, 1) if base_row[3] is not None else None,
-                "random_walk_pct": round((base_row[4] or 0) / total * 100, 1) if base_row[4] is not None else None,
+                "flat_pct": round((base_row[4] or 0) / total * 100, 1) if base_row[4] is not None else None,
             }
 
         band_stats = {}
@@ -853,7 +862,11 @@ def compute_position_size(upside_prob, confidence, regime, last_price, p10, p90,
     Capital default = 10000 (adjust in UI per your actual capital).
     """
     try:
-        edge = abs(upside_prob - 50) / 50.0  # 0 to 1
+        direction = "LONG" if upside_prob >= 50 else "SHORT"
+
+        # Win probability — use upside_prob directly (not "edge" which was wrong)
+        p = upside_prob / 100.0 if direction == "LONG" else (1.0 - upside_prob / 100.0)
+        p = max(0.01, min(0.99, p))
 
         regime_mult = {"Trending": 1.0, "Weak Trend": 0.6, "Choppy": 0.0}.get(regime, 0.5)
         conf_mult   = max(0.1, confidence / 100.0)
@@ -862,13 +875,13 @@ def compute_position_size(upside_prob, confidence, regime, last_price, p10, p90,
         avg_loss = abs(last_price - p10) / last_price if last_price > 0 else 0.05
         avg_loss = max(avg_loss, 0.001)
 
-        kelly = (edge * avg_win - (1 - edge) * avg_loss) / avg_win
+        # Correct Kelly: f = (p * b - q) / b where b = avg_win/avg_loss
+        kelly = (p * avg_win - (1 - p) * avg_loss) / (avg_win + 1e-10)
         kelly = max(0.0, min(kelly, 0.25))  # cap at quarter-Kelly
 
         size     = kelly * regime_mult * conf_mult
         size     = min(size, 0.10)  # hard cap: never more than 10% of capital
 
-        direction = "LONG" if upside_prob >= 50 else "SHORT"
         stop      = p10 if direction == "LONG" else p90
         risk_dist = abs(last_price - stop)
         target    = last_price + (1.5 * risk_dist) if direction == "LONG" else last_price - (1.5 * risk_dist)
@@ -1223,12 +1236,12 @@ def get_request_stats():
         with sqlite3.connect(DB_FILE) as conn:
             rows = conn.execute("""
                 SELECT symbol, COUNT(*) as cnt FROM request_log
-                WHERE requested_at > datetime('now', '-24 hours')
+                WHERE datetime(requested_at) > datetime('now', '-24 hours')
                 GROUP BY symbol ORDER BY cnt DESC
             """).fetchall()
             total = conn.execute("""
                 SELECT COUNT(*) FROM request_log
-                WHERE requested_at > datetime('now', '-24 hours')
+                WHERE datetime(requested_at) > datetime('now', '-24 hours')
             """).fetchone()[0]
         return {"total_24h": total, "by_coin": {s: c for s, c in rows}}
     except Exception:

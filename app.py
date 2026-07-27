@@ -244,7 +244,7 @@ def close_paper_trades():
                 except Exception:
                     pred_ts = None
 
-                klines_params = {"symbol": COINS[sym], "interval": "1h", "limit": 24}
+                klines_params = {"symbol": COINS[sym], "interval": "1h", "limit": 1000}
                 if pred_ts:
                     klines_params["startTime"] = pred_ts
 
@@ -871,8 +871,13 @@ def compute_position_size(upside_prob, confidence, regime, last_price, p10, p90,
         regime_mult = {"Trending": 1.0, "Weak Trend": 0.6, "Choppy": 0.0}.get(regime, 0.5)
         conf_mult   = max(0.1, confidence / 100.0)
 
-        avg_win  = abs(p90 - last_price) / last_price if last_price > 0 else 0.05
-        avg_loss = abs(last_price - p10) / last_price if last_price > 0 else 0.05
+        # Direction-aware win/loss distances
+        if direction == "LONG":
+            avg_win  = abs(p90 - last_price) / last_price if last_price > 0 else 0.05
+            avg_loss = abs(last_price - p10) / last_price if last_price > 0 else 0.05
+        else:  # SHORT: win = price falls to P10, loss = price rises to P90
+            avg_win  = abs(last_price - p10) / last_price if last_price > 0 else 0.05
+            avg_loss = abs(p90 - last_price) / last_price if last_price > 0 else 0.05
         avg_loss = max(avg_loss, 0.001)
 
         # Correct Kelly: f = (p * b - q) / b where b = avg_win/avg_loss

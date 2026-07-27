@@ -104,6 +104,24 @@ def init_db():
                 requested_at TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS paper_trades (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol       TEXT NOT NULL,
+                predicted_at TEXT NOT NULL,
+                direction    TEXT NOT NULL,
+                entry_price  REAL NOT NULL,
+                stop_price   REAL NOT NULL,
+                target_price REAL NOT NULL,
+                size_pct     REAL NOT NULL,
+                risk_pct     REAL NOT NULL,
+                closed       INTEGER DEFAULT 0,
+                exit_price   REAL,
+                exit_reason  TEXT,
+                pnl_pct      REAL,
+                closed_at    TEXT
+            )
+        """)
         conn.commit()
 
     # Migrations for existing databases
@@ -162,8 +180,90 @@ def save_prediction(symbol, result):
         with cache_lock:
             cache[symbol] = result
         print(f"[DB] {symbol} saved.", flush=True)
+        log_paper_trade(symbol, result)
     except Exception as e:
         print(f"[DB] Save failed: {e}", flush=True)
+
+
+def log_paper_trade(symbol, result):
+    """Log paper trade when signal is LONG or SHORT. Auto-closes after 24h."""
+    try:
+        ps  = result.get("position_size")
+        sig = result.get("signal_context", {}).get("trade_signal")
+        if sig not in ("LONG", "SHORT") or not ps:
+            return
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("""
+                    INSERT INTO paper_trades
+                    (symbol, predicted_at, direction, entry_price,
+                     stop_price, target_price, size_pct, risk_pct)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (symbol, result["updated_at"], sig, result["last_price"],
+                      ps["stop_loss"], ps["take_profit"], ps["size_pct"], ps["risk_pct"]))
+                conn.commit()
+        print(f"[Paper] {symbol} {sig} trade logged. Entry={result['last_price']} Stop={ps['stop_loss']} Target={ps['take_profit']}", flush=True)
+    except Exception as e:
+        print(f"[Paper] Log failed: {e}", flush=True)
+
+
+def close_paper_trades():
+    """Close open paper trades: hit stop/target, or auto-close at 24h."""
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                open_trades = conn.execute("""
+                    SELECT id, symbol, direction, entry_price, stop_price, target_price
+                    FROM paper_trades WHERE closed=0
+                    AND predicted_at < datetime('now', '-24 hours')
+                """).fetchall()
+
+        for trade in open_trades:
+            tid, sym, direction, entry, stop, target = trade
+            if sym not in COINS:
+                continue
+            try:
+                r = requests.get("https://api.binance.com/api/v3/ticker/price",
+                                 params={"symbol": COINS[sym]}, timeout=10)
+                if not r.ok:
+                    continue
+                current = float(r.json()["price"])
+
+                # Check stop and target
+                if direction == "LONG":
+                    if current <= stop:
+                        exit_reason, exit_price = "STOP_HIT", stop
+                    elif current >= target:
+                        exit_reason, exit_price = "TARGET_HIT", target
+                    else:
+                        exit_reason, exit_price = "TIME_EXIT", current
+                else:  # SHORT
+                    if current >= stop:
+                        exit_reason, exit_price = "STOP_HIT", stop
+                    elif current <= target:
+                        exit_reason, exit_price = "TARGET_HIT", target
+                    else:
+                        exit_reason, exit_price = "TIME_EXIT", current
+
+                if direction == "LONG":
+                    pnl_pct = (exit_price - entry) / entry * 100
+                else:
+                    pnl_pct = (entry - exit_price) / entry * 100
+
+                with db_lock:
+                    with sqlite3.connect(DB_FILE) as conn:
+                        conn.execute("""
+                            UPDATE paper_trades
+                            SET closed=1, exit_price=?, exit_reason=?, pnl_pct=?, closed_at=?
+                            WHERE id=?
+                        """, (exit_price, exit_reason, round(pnl_pct, 3),
+                              datetime.now(timezone.utc).isoformat(), tid))
+                        conn.commit()
+                print(f"[Paper] {sym} {direction} closed: {exit_reason} PnL={pnl_pct:.2f}%", flush=True)
+            except Exception as e:
+                print(f"[Paper] Close {tid} failed: {e}", flush=True)
+    except Exception as e:
+        print(f"[Paper] Close loop failed: {e}", flush=True)
 
 
 def load_cache_from_disk():
@@ -1010,9 +1110,11 @@ def load_model():
 
         def accuracy_loop():
             check_accuracy()
+            close_paper_trades()
             while True:
                 time.sleep(3600)
                 check_accuracy()
+                close_paper_trades()
         threading.Thread(target=accuracy_loop, daemon=True, name="AccuracyChecker").start()
 
     except Exception as e:
@@ -1119,6 +1221,50 @@ def predict(symbol):
 @app.route("/accuracy")
 def accuracy_route():
     return jsonify(get_accuracy_stats())
+
+@app.route("/paper_pnl")
+def paper_pnl():
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            open_trades = conn.execute("""
+                SELECT symbol, direction, entry_price, stop_price, target_price,
+                       size_pct, risk_pct, predicted_at
+                FROM paper_trades WHERE closed=0
+                ORDER BY predicted_at DESC
+            """).fetchall()
+
+            closed_trades = conn.execute("""
+                SELECT symbol, direction, entry_price, exit_price,
+                       exit_reason, pnl_pct, size_pct, closed_at
+                FROM paper_trades WHERE closed=1
+                ORDER BY closed_at DESC LIMIT 50
+            """).fetchall()
+
+            totals = conn.execute("""
+                SELECT COUNT(*) as total,
+                       SUM(CASE WHEN pnl_pct > 0 THEN 1 ELSE 0 END) as wins,
+                       SUM(pnl_pct) as total_pnl,
+                       AVG(pnl_pct) as avg_pnl
+                FROM paper_trades WHERE closed=1
+            """).fetchone()
+
+        return jsonify({
+            "open": [{"symbol": r[0], "direction": r[1], "entry": r[2],
+                      "stop": r[3], "target": r[4], "size_pct": r[5],
+                      "risk_pct": r[6], "predicted_at": r[7]} for r in open_trades],
+            "closed": [{"symbol": r[0], "direction": r[1], "entry": r[2],
+                        "exit": r[3], "reason": r[4], "pnl_pct": r[5],
+                        "size_pct": r[6], "closed_at": r[7]} for r in closed_trades],
+            "summary": {
+                "total_trades": totals[0] or 0,
+                "wins": totals[1] or 0,
+                "total_pnl_pct": round(totals[2] or 0, 2),
+                "avg_pnl_pct": round(totals[3] or 0, 2),
+                "win_rate": round((totals[1] or 0) / (totals[0] or 1) * 100, 1),
+            }
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))

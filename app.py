@@ -240,7 +240,7 @@ def close_paper_trades():
 
                 # Fetch last 24 1h candles for wick detection
                 r = requests.get("https://api.binance.com/api/v3/klines",
-                                 params={"symbol": COINS[sym], "interval": "1h", "limit": 24}, timeout=10)
+                                 params={"symbol": COINS[sym], "interval": "1h", "limit": 24}, timeout=(3, 10))
                 if not r.ok:
                     continue
                 candles  = r.json()
@@ -330,7 +330,7 @@ def check_accuracy():
                 continue
             try:
                 r = requests.get("https://api.binance.com/api/v3/ticker/price",
-                                 params={"symbol": COINS[symbol]}, timeout=10)
+                                 params={"symbol": COINS[symbol]}, timeout=(3, 10))
                 if r.ok:
                     actual = float(r.json()["price"])
 

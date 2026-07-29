@@ -644,22 +644,27 @@ function showResults(d) {
   var psCard = document.getElementById('positionCard');
   if (d.position_size && psCard) {
     var ps = d.position_size;
-    var userCapital = getCapital();
-    var scaledMax = Math.round(userCapital * (ps.size_pct / 100));
     var active = (sig === 'LONG' || sig === 'SHORT');
-    psCard.classList.remove('hidden');
-    psCard.style.opacity = active ? '1' : '0.4';
-    var psColor = sig === 'LONG' ? 'var(--green)' : sig === 'SHORT' ? 'var(--red)' : 'var(--muted2)';
-    document.getElementById('psSize').textContent = ps.size_pct + '% of capital';
-    document.getElementById('psSize').style.color = psColor;
-    document.getElementById('psStop').textContent = fmt(ps.stop_loss);
-    document.getElementById('psTarget').textContent = fmt(ps.take_profit);
-    document.getElementById('psRisk').textContent = ps.risk_pct + '% at risk';
-    document.getElementById('psMax').textContent = '$' + scaledMax.toLocaleString() + ' (on $' + userCapital.toLocaleString() + ')';
-    // Store for clipboard and price alert
-    currentStopPrice   = ps.stop_loss;
-    currentTargetPrice = ps.take_profit;
-    window._lastSignal = sig;
+
+    // Hide completely when no actionable signal — showing numbers with NO TRADE is confusing
+    if (!active) {
+      psCard.classList.add('hidden');
+    } else {
+      psCard.classList.remove('hidden');
+      psCard.style.opacity = '1';
+      var userCapital = getCapital();
+      var scaledMax = Math.round(userCapital * (ps.size_pct / 100));
+      var psColor = sig === 'LONG' ? 'var(--green)' : 'var(--red)';
+      document.getElementById('psSize').textContent = ps.size_pct + '% of capital';
+      document.getElementById('psSize').style.color = psColor;
+      document.getElementById('psStop').textContent = fmt(ps.stop_loss);
+      document.getElementById('psTarget').textContent = fmt(ps.take_profit);
+      document.getElementById('psRisk').textContent = ps.risk_pct + '% at risk';
+      document.getElementById('psMax').textContent = '$' + scaledMax.toLocaleString() + ' (on $' + userCapital.toLocaleString() + ')';
+      currentStopPrice   = ps.stop_loss;
+      currentTargetPrice = ps.take_profit;
+      window._lastSignal = sig;
+    }
   }
 
   // Regime badge (#8)

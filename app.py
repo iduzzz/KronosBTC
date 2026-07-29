@@ -880,7 +880,8 @@ def compute_position_size(upside_prob, confidence, regime, last_price, p10, p90,
             avg_loss = abs(p90 - last_price) / last_price if last_price > 0 else 0.05
         avg_loss = max(avg_loss, 0.001)
 
-        # Correct Kelly: f = (p * b - q) / b where b = avg_win/avg_loss
+        # Kelly criterion: f = (p * avg_win - (1-p) * avg_loss) / avg_win
+        # Algebraically equivalent to f = (p * b - q) / b where b = avg_win/avg_loss
         kelly = (p * avg_win - (1 - p) * avg_loss) / (avg_win + 1e-10)
         kelly = max(0.0, min(kelly, 0.25))  # cap at quarter-Kelly
 
@@ -1060,15 +1061,24 @@ def run_prediction(symbol):
     spread_pct   = (upper - lower) / last_price * 100
     avg_spread   = float(spread_pct.mean())
 
-    if avg_spread < hist_vol_24h:
-        confidence    = round(max(10.0, 50.0 - (hist_vol_24h - avg_spread) * 3), 1)
-        hallucinating = True
+    # Ratio of model spread to 24h historical volatility
+    # ratio < 1.0: model too tight (hallucinating)
+    # ratio = 1.0: perfectly calibrated (peak confidence = 75%)
+    # ratio > 1.0: model spread wider than history (increasing uncertainty)
+    spread_ratio = avg_spread / max(hist_vol_24h, 0.001)
+    hallucinating = spread_ratio < 1.0
+
+    if hallucinating:
+        # Confidence scales linearly from 10% (ratio=0) to 75% (ratio=1)
+        # Fully continuous at boundary
+        confidence = round(max(10.0, 75.0 * spread_ratio), 1)
     else:
-        confidence    = round(max(0.0, 100.0 - avg_spread * 2), 1)
-        hallucinating = False
+        # Confidence peaks at 75% (ratio=1) and decreases as spread widens
+        # Fully continuous at boundary: both formulas give 75% at ratio=1
+        confidence = round(max(10.0, 100.0 - 25.0 * spread_ratio), 1)
 
     print(f"[Kronos] {symbol} spread={avg_spread:.2f}% hist_vol_24h={hist_vol_24h:.2f}% "
-          f"hallucinating={hallucinating} conf={confidence}", flush=True)
+          f"ratio={spread_ratio:.2f} hallucinating={hallucinating} conf={confidence}", flush=True)
 
     signal_context = interpret_signals(
         upside_prob, sig["indicators"], sig["fear_greed"],

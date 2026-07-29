@@ -1057,7 +1057,6 @@ def run_prediction(symbol):
     std_pct      = std / last_price * 100
     hist_vol_pct = float(df["close"].pct_change().dropna().std() * 100)
     hist_vol_24h = hist_vol_pct * float(np.sqrt(PRED_LEN))
-    vol_amp_prob = float((std_pct > hist_vol_pct).mean()) * 100
     spread_pct   = (upper - lower) / last_price * 100
     avg_spread   = float(spread_pct.mean())
 
@@ -1092,7 +1091,6 @@ def run_prediction(symbol):
         "raw_upside_prob":    round(raw_upside_prob, 1),
         "hallucinating":      hallucinating,
         "confidence":         confidence,
-        "vol_amp_prob":       round(vol_amp_prob, 1),
         "lookback_used":      pred.get("lookback_used", LOOKBACK),
         "momentum_direction": mom_direction,
         "carry_direction":    carry_direction,

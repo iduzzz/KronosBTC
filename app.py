@@ -953,8 +953,8 @@ def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
     if not ind.get("vol_valid", True):
         warnings.append(f"Unusual volume detected ({ind['vol_ratio']:.2f}x) - data may be unreliable")
 
-    # #8: Hard regime veto — choppy + neutral funding = NO_TRADE regardless of Kronos
-    choppy_veto = (adx < 20) and (fund is None or abs(fund) < 0.01)
+    # Hard regime veto — choppy + near-neutral funding = NO_TRADE regardless of Kronos
+    choppy_veto = (adx < 20) and (fund is None or abs(fund) < 0.05)
     if choppy_veto:
         warnings.append(f"REGIME VETO: Market choppy (ADX={adx:.0f}) + neutral funding - trade signal forced to NO_TRADE")
 

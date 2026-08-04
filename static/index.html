@@ -94,14 +94,13 @@ canvas{width:100%!important;height:100%!important}
 .badge-purple{background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.3);color:var(--purple)}
 .badge-red{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red)}
 .spinner{width:10px;height:10px;border:2px solid rgba(245,158,11,.3);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
-.explain-row{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:10px}
-.explain-header{display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px}
-.explain-name{font-size:13px;font-weight:700;color:var(--text)}
-.explain-what{font-size:10px;color:var(--muted2);font-weight:400}
-.explain-meaning{font-size:11px;color:var(--muted2);margin-top:2px}
-.explain-val{font-size:18px;font-weight:800;min-width:60px;text-align:right}
-.explain-signal{font-size:12px;font-weight:700;margin-bottom:6px;padding:4px 8px;border-radius:6px;display:inline-block}
-.explain-guide{font-size:11px;color:var(--muted2);line-height:1.9;border-top:1px solid var(--border);padding-top:8px;margin-top:4px}
+.tile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.tile{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color 0.2s}
+.tile:active{border-color:var(--accent)}
+.tile-name{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.tile-val{font-size:18px;font-weight:800;margin-bottom:4px}
+.tile-sig{font-size:10px;font-weight:600;padding:2px 6px;border-radius:4px;display:inline-block}
+.tile-explain{font-size:11px;color:var(--muted2);line-height:1.8;margin-top:8px;border-top:1px solid var(--border);padding-top:8px}
 @keyframes spin{to{transform:rotate(360deg)}}
 .updated{text-align:center;font-size:11px;color:var(--muted);padding:2px 0 6px}
 .stale-warn{color:var(--orange);font-weight:600}
@@ -318,215 +317,149 @@ canvas{width:100%!important;height:100%!important}
 
     <!-- Technical Indicators -->
     <div class="card">
-      <div class="card-title">Technical Indicators — What They Mean</div>
-
-      <!-- RSI -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">RSI 14 <span class="explain-what">(Relative Strength Index)</span></div>
-            <div class="explain-meaning">Measures if coin is overbought or oversold</div>
+      <div class="card-title">Technical Indicators <span style="font-size:10px;color:var(--muted2);font-weight:400">— tap any tile for explanation</span></div>
+      <div class="tile-grid">
+        <div class="tile" onclick="toggleTile('rsiTile')">
+          <div class="tile-name">RSI 14</div>
+          <div class="tile-val" id="rsiVal">-</div>
+          <div class="tile-sig" id="rsiSignal">-</div>
+          <div class="tile-explain hidden" id="rsiTile">
+            <b>Relative Strength Index — Is the coin overbought or oversold?</b><br><br>
+            🟢 &lt;30 = OVERSOLD — coin fell too fast, bounce likely UP<br>
+            🟡 30–50 = SLIGHTLY BEARISH — mild downward pressure<br>
+            ⚪ 50–70 = NEUTRAL/BULLISH — normal healthy range<br>
+            🔴 &gt;70 = OVERBOUGHT — coin rose too fast, drop likely<br>
+            🚨 &gt;80 = EXTREMELY OVERBOUGHT — high reversal risk
           </div>
-          <div class="explain-val" id="rsiVal">-</div>
         </div>
-        <div class="explain-signal" id="rsiSignal">-</div>
-        <div class="explain-guide">
-          🔴 &lt;30 = OVERSOLD — coin fell too fast, bounce likely UP<br>
-          🟡 30–50 = SLIGHTLY BEARISH — mild downward pressure<br>
-          ⚪ 50–70 = NEUTRAL/BULLISH — normal healthy range<br>
-          🔴 &gt;70 = OVERBOUGHT — coin rose too fast, drop likely<br>
-          🚨 &gt;80 = EXTREMELY OVERBOUGHT — high reversal risk
-        </div>
-      </div>
-
-      <!-- MACD -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">MACD <span class="explain-what">(Moving Average Convergence Divergence)</span></div>
-            <div class="explain-meaning">Shows momentum direction — is the trend accelerating or slowing?</div>
+        <div class="tile" onclick="toggleTile('macdTile')">
+          <div class="tile-name">MACD</div>
+          <div class="tile-val" id="macdVal">-</div>
+          <div class="tile-sig" id="macdSignal">-</div>
+          <div class="tile-explain hidden" id="macdTile">
+            <b>Is momentum going UP or DOWN?</b><br><br>
+            🟢 BULL = Upward momentum accelerating — confirms buy signals<br>
+            🔴 BEAR = Downward momentum accelerating — confirms sell signals<br>
+            ⚠️ When MACD disagrees with Kronos = mixed signal, be cautious
           </div>
-          <div class="explain-val" id="macdVal">-</div>
         </div>
-        <div class="explain-signal" id="macdSignal">-</div>
-        <div class="explain-guide">
-          🟢 BULL = Upward momentum is accelerating — confirms buy signals<br>
-          🔴 BEAR = Downward momentum is accelerating — confirms sell signals<br>
-          ⚠️ When MACD disagrees with Kronos = mixed signal, be cautious
-        </div>
-      </div>
-
-      <!-- BB% -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">BB % <span class="explain-what">(Bollinger Band Position)</span></div>
-            <div class="explain-meaning">Where is price inside its normal trading range?</div>
+        <div class="tile" onclick="toggleTile('bbTile')">
+          <div class="tile-name">BB %</div>
+          <div class="tile-val" id="bbVal">-</div>
+          <div class="tile-sig" id="bbSignal">-</div>
+          <div class="tile-explain hidden" id="bbTile">
+            <b>Bollinger Band — Where is price in its normal range?</b><br><br>
+            🟢 0–20% = NEAR BOTTOM — oversold, bounce possible<br>
+            ⚪ 20–80% = MIDDLE RANGE — normal, no extreme<br>
+            🔴 80–100% = NEAR TOP — overbought, drop possible
           </div>
-          <div class="explain-val" id="bbVal">-</div>
         </div>
-        <div class="explain-signal" id="bbSignal">-</div>
-        <div class="explain-guide">
-          🟢 0–20% = NEAR BOTTOM BAND — oversold, potential bounce<br>
-          ⚪ 20–80% = MIDDLE RANGE — normal, no extreme reading<br>
-          🔴 80–100% = NEAR TOP BAND — overbought, potential drop<br>
-          💡 100% means price broke above upper band — strong move but risky
-        </div>
-      </div>
-
-      <!-- ADX -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">ADX <span class="explain-what">(Average Directional Index)</span></div>
-            <div class="explain-meaning">HOW STRONG is the current trend — NOT which direction</div>
+        <div class="tile" onclick="toggleTile('adxTile')">
+          <div class="tile-name">ADX</div>
+          <div class="tile-val" id="adxVal">-</div>
+          <div class="tile-sig" id="adxSignal">-</div>
+          <div class="tile-explain hidden" id="adxTile">
+            <b>Trend Strength — HOW STRONG is the trend (NOT direction!)</b><br><br>
+            🔴 &lt;20 = CHOPPY — DO NOT TRADE, all signals unreliable<br>
+            🟡 20–25 = WEAK TREND — wait for confirmation<br>
+            🟢 25–35 = TRENDING — good conditions, signals reliable<br>
+            🟢 35–50 = STRONG TREND — excellent trading conditions<br>
+            ⚡ &gt;50 = VERY STRONG TREND — powerful move in progress
           </div>
-          <div class="explain-val" id="adxVal">-</div>
         </div>
-        <div class="explain-signal" id="adxSignal">-</div>
-        <div class="explain-guide">
-          🔴 &lt;20 = CHOPPY — no real trend, DO NOT TRADE, all signals unreliable<br>
-          🟡 20–25 = WEAK TREND — trend forming, wait for confirmation<br>
-          🟢 25–35 = TRENDING — good conditions, signals are reliable<br>
-          🟢 35–50 = STRONG TREND — excellent conditions for trading<br>
-          ⚡ &gt;50 = VERY STRONG TREND — powerful move in progress
-        </div>
-      </div>
-
-      <!-- Volume -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">Vol Ratio <span class="explain-what">(Volume vs 20-day Average)</span></div>
-            <div class="explain-meaning">Is trading activity unusual? High volume confirms moves</div>
+        <div class="tile" onclick="toggleTile('volTile')">
+          <div class="tile-name">Vol Ratio</div>
+          <div class="tile-val" id="volRatioVal">-</div>
+          <div class="tile-sig" id="volSignal">-</div>
+          <div class="tile-explain hidden" id="volTile">
+            <b>Volume vs 20-day average — Is trading activity unusual?</b><br><br>
+            🔴 &lt;0.3x = VERY LOW — price moves unreliable<br>
+            🟡 0.3–0.7x = LOW — treat signals with caution<br>
+            🟢 0.7–1.5x = NORMAL — healthy activity<br>
+            🟢 1.5–3x = HIGH — confirms price moves<br>
+            ⚡ &gt;3x = EXTREMELY HIGH — major event, be careful
           </div>
-          <div class="explain-val" id="volRatioVal">-</div>
         </div>
-        <div class="explain-signal" id="volSignal">-</div>
-        <div class="explain-guide">
-          🔴 &lt;0.3x = VERY LOW VOLUME — price moves are unreliable, data weak<br>
-          🟡 0.3–0.7x = LOW VOLUME — mild activity, treat signals with caution<br>
-          🟢 0.7–1.5x = NORMAL VOLUME — healthy trading activity<br>
-          🟢 1.5–3x = HIGH VOLUME — strong interest, confirms price moves<br>
-          ⚡ &gt;3x = EXTREMELY HIGH — major event happening, be careful
-        </div>
-      </div>
-
-      <!-- SMA20 -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">SMA 20 <span class="explain-what">(20-hour Moving Average)</span></div>
-            <div class="explain-meaning">The average price of last 20 hours — key support/resistance</div>
+        <div class="tile" onclick="toggleTile('smaTile')">
+          <div class="tile-name">SMA 20</div>
+          <div class="tile-val" id="sma20Val">-</div>
+          <div class="tile-sig" id="smaSignal">-</div>
+          <div class="tile-explain hidden" id="smaTile">
+            <b>20-hour average price — Key support/resistance level</b><br><br>
+            🟢 Price ABOVE SMA20 = Bullish uptrend in place<br>
+            🔴 Price BELOW SMA20 = Bearish downtrend in place<br>
+            ⚠️ Price crossing SMA20 = potential trend change
           </div>
-          <div class="explain-val" id="sma20Val">-</div>
         </div>
-        <div class="explain-signal" id="smaSignal">-</div>
-        <div class="explain-guide">
-          🟢 Price ABOVE SMA20 = Bullish — uptrend in place<br>
-          🔴 Price BELOW SMA20 = Bearish — downtrend in place<br>
-          💡 SMA20 acts as support when price falls toward it<br>
-          ⚠️ Price crossing SMA20 = potential trend change signal
-        </div>
-      </div>
-
-      <!-- Fear & Greed -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">Fear &amp; Greed <span class="explain-what">(Market Sentiment Index 0-100)</span></div>
-            <div class="explain-meaning">Overall crypto market mood — contrarian indicator</div>
+        <div class="tile" onclick="toggleTile('fgTile')">
+          <div class="tile-name">Fear &amp; Greed</div>
+          <div class="tile-val" id="fgVal">-</div>
+          <div class="tile-sig" id="fgSignal">-</div>
+          <div class="tile-explain hidden" id="fgTile">
+            <b>Market Sentiment 0–100 — Contrarian indicator (BTC only)</b><br><br>
+            🟢 0–25 = EXTREME FEAR — historically great BUY zone<br>
+            🟡 25–45 = FEAR — market nervous, potential opportunity<br>
+            ⚪ 45–55 = NEUTRAL — no strong sentiment<br>
+            🟡 55–75 = GREED — market optimistic, be cautious<br>
+            🔴 75–100 = EXTREME GREED — historically great SELL zone
           </div>
-          <div class="explain-val" id="fgVal">-</div>
-        </div>
-        <div class="explain-signal" id="fgSignal">-</div>
-        <div class="explain-guide">
-          🟢 0–25 = EXTREME FEAR — historically great BUY zone<br>
-          🟡 25–45 = FEAR — market nervous, potential opportunity<br>
-          ⚪ 45–55 = NEUTRAL — no strong sentiment<br>
-          🟡 55–75 = GREED — market optimistic, be cautious<br>
-          🔴 75–100 = EXTREME GREED — historically great SELL zone
         </div>
       </div>
     </div>
 
     <!-- Crypto-Native Signals -->
     <div class="card">
-      <div class="card-title">Crypto-Native Signals — What They Mean</div>
-
-      <!-- Funding Rate -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">Funding Rate <span class="explain-what">(Futures Market)</span></div>
-            <div class="explain-meaning">Are traders heavily betting one direction in futures?</div>
+      <div class="card-title">Crypto-Native Signals <span style="font-size:10px;color:var(--muted2);font-weight:400">— tap any tile for explanation</span></div>
+      <div class="tile-grid">
+        <div class="tile" onclick="toggleTile('fundTile')">
+          <div class="tile-name">Funding Rate</div>
+          <div class="tile-val" id="fundingVal">-</div>
+          <div class="tile-sig" id="fundingSignal">-</div>
+          <div class="tile-explain hidden" id="fundTile">
+            <b>Futures market positioning — Too many longs or shorts?</b><br><br>
+            🟢 &lt;-0.05% = TOO MANY SHORTS — squeeze likely UP<br>
+            🟢 -0.05 to -0.01% = SHORTS CROWDED — bullish lean<br>
+            ⚪ Near zero = NEUTRAL — balanced market<br>
+            🟡 0.01–0.05% = LONGS CROWDED — mild caution<br>
+            🔴 &gt;0.05% = TOO MANY LONGS — correction likely DOWN
           </div>
-          <div class="explain-val" id="fundingVal">-</div>
         </div>
-        <div class="explain-signal" id="fundingSignal">-</div>
-        <div class="explain-guide">
-          🟢 Very Negative (&lt;-0.05%) = TOO MANY SHORTS — squeeze likely UP<br>
-          🟢 Negative (-0.05 to -0.01%) = SHORTS CROWDED — bullish lean<br>
-          ⚪ Near Zero = NEUTRAL — balanced market<br>
-          🟡 Positive (0.01–0.05%) = LONGS CROWDED — mild caution<br>
-          🔴 Very Positive (&gt;0.05%) = TOO MANY LONGS — correction likely DOWN
-        </div>
-      </div>
-
-      <!-- ETF Flows -->
-      <div class="explain-row" id="etfRow">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">ETF Flows <span class="explain-what">(Bitcoin ETF Daily Flows)</span></div>
-            <div class="explain-meaning">Are big institutions buying or selling Bitcoin today?</div>
+        <div class="tile" id="etfRow" onclick="toggleTile('etfTile')">
+          <div class="tile-name">ETF Flows</div>
+          <div class="tile-val" id="etfVal">-</div>
+          <div class="tile-sig" id="etfSignal">-</div>
+          <div class="tile-explain hidden" id="etfTile">
+            <b>Bitcoin ETF daily flows — Are institutions buying or selling?</b><br><br>
+            🟢 &gt;$300M = STRONG INFLOWS — institutions buying heavily<br>
+            🟢 $0–$300M = INFLOWS — institutions buying, mild bullish<br>
+            🔴 -$300M–$0 = OUTFLOWS — institutions selling, mild bearish<br>
+            🔴 &lt;-$300M = STRONG OUTFLOWS — very bearish
           </div>
-          <div class="explain-val" id="etfVal">-</div>
         </div>
-        <div class="explain-signal" id="etfSignal">-</div>
-        <div class="explain-guide">
-          🟢 &gt;$300M = STRONG INFLOWS — institutions buying heavily, very bullish<br>
-          🟢 $0–$300M = INFLOWS — institutions buying, mild bullish<br>
-          🔴 -$300M–$0 = OUTFLOWS — institutions selling, mild bearish<br>
-          🔴 &lt;-$300M = STRONG OUTFLOWS — institutions selling heavily, very bearish<br>
-          ⚪ N/A = Data unavailable today
-        </div>
-      </div>
-
-      <!-- Mempool -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">Mempool <span class="explain-what">(Bitcoin Network Activity)</span></div>
-            <div class="explain-meaning">How busy is Bitcoin network? High activity = high demand</div>
+        <div class="tile" onclick="toggleTile('memTile')">
+          <div class="tile-name">Mempool</div>
+          <div class="tile-val" id="memVal">-</div>
+          <div class="tile-sig" id="memSignal">-</div>
+          <div class="tile-explain hidden" id="memTile">
+            <b>Bitcoin network congestion — High activity = high demand</b><br><br>
+            🟢 &lt;5,000 = LOW — network quiet, cheap fees<br>
+            ⚪ 5K–50K = NORMAL — typical daily activity<br>
+            🟡 50K–100K = HIGH — moderate congestion<br>
+            🔴 &gt;100K = VERY HIGH — peak demand, often signals local top
           </div>
-          <div class="explain-val" id="memVal">-</div>
         </div>
-        <div class="explain-signal" id="memSignal">-</div>
-        <div class="explain-guide">
-          🟢 &lt;5,000 = LOW — network quiet, fees cheap<br>
-          ⚪ 5,000–50,000 = NORMAL — typical daily activity<br>
-          🟡 50,000–100,000 = HIGH — increased activity, moderate congestion<br>
-          🔴 &gt;100,000 = VERY HIGH — heavy congestion, high fees, peak demand<br>
-          💡 Very High mempool often signals local market tops
-        </div>
-      </div>
-
-      <!-- BTC Dominance -->
-      <div class="explain-row">
-        <div class="explain-header">
-          <div>
-            <div class="explain-name">BTC Dominance <span class="explain-what">(Bitcoin % of total crypto market)</span></div>
-            <div class="explain-meaning">Key for altcoin trading — when BTC dominates, alts suffer</div>
+        <div class="tile" onclick="toggleTile('domTile')">
+          <div class="tile-name">BTC Dominance</div>
+          <div class="tile-val" id="domVal">-</div>
+          <div class="tile-sig" id="domSignal">-</div>
+          <div class="tile-explain hidden" id="domTile">
+            <b>Bitcoin % of total crypto market — Key for ZEC/TAO trading</b><br><br>
+            🟢 &lt;45% = ALT SEASON — great time for ZEC/TAO<br>
+            🟢 45–50% = FAVORABLE — alts performing well<br>
+            ⚪ 50–55% = NEUTRAL — mixed for alts<br>
+            🟡 55–60% = BTC DOMINANT — alts under pressure<br>
+            🔴 &gt;60% = BITCOIN SEASON — avoid ZEC/TAO trading
           </div>
-          <div class="explain-val" id="domVal">-</div>
-        </div>
-        <div class="explain-signal" id="domSignal">-</div>
-        <div class="explain-guide">
-          🟢 &lt;45% = ALT SEASON — great time for ZEC/TAO trading<br>
-          🟢 45–50% = FAVORABLE FOR ALTS — alts performing well<br>
-          ⚪ 50–55% = NEUTRAL — mixed environment for alts<br>
-          🟡 55–60% = BTC DOMINANT — alts under pressure<br>
-          🔴 &gt;60% = BITCOIN SEASON — DO NOT trade alts, money flowing to BTC only
         </div>
       </div>
     </div>
@@ -958,7 +891,7 @@ function showResults(d) {
     var rsi = ind.rsi;
     var rsiEl = document.getElementById('rsiVal');
     rsiEl.textContent = rsi.toFixed(1);
-    rsiEl.className = 'explain-val ' + (rsi < 30 ? 'up' : rsi > 70 ? 'down' : 'warn');
+    rsiEl.className = 'tile-val ' + (rsi < 30 ? 'up' : rsi > 70 ? 'down' : 'warn');
     if (rsi < 30)       setSignal('rsiSignal', '🟢 OVERSOLD — Potential bounce UP', 'green');
     else if (rsi < 45)  setSignal('rsiSignal', '🟡 SLIGHTLY BEARISH', 'orange');
     else if (rsi < 55)  setSignal('rsiSignal', '⚪ NEUTRAL', 'neutral');
@@ -970,14 +903,14 @@ function showResults(d) {
     var mh = ind.macd_hist;
     var macdEl = document.getElementById('macdVal');
     macdEl.textContent = mh >= 0 ? 'Bull' : 'Bear';
-    macdEl.className = 'explain-val ' + (mh >= 0 ? 'up' : 'down');
+    macdEl.className = 'tile-val ' + (mh >= 0 ? 'up' : 'down');
     setSignal('macdSignal', mh >= 0 ? '🟢 BULLISH MOMENTUM — Upward acceleration' : '🔴 BEARISH MOMENTUM — Downward acceleration', mh >= 0 ? 'green' : 'red');
 
     // BB%
     var bb = ind.bb_pct * 100;
     var bbEl = document.getElementById('bbVal');
     bbEl.textContent = bb.toFixed(0) + '%';
-    bbEl.className = 'explain-val ' + (bb < 20 ? 'up' : bb > 80 ? 'down' : 'warn');
+    bbEl.className = 'tile-val ' + (bb < 20 ? 'up' : bb > 80 ? 'down' : 'warn');
     if (bb < 20)       setSignal('bbSignal', '🟢 NEAR BOTTOM BAND — Oversold zone, bounce possible', 'green');
     else if (bb < 80)  setSignal('bbSignal', '⚪ MIDDLE RANGE — Normal, no extreme reading', 'neutral');
     else               setSignal('bbSignal', '🔴 NEAR TOP BAND — Overbought zone, drop possible', 'red');
@@ -986,7 +919,7 @@ function showResults(d) {
     var adx = ind.adx || 0;
     var adxEl = document.getElementById('adxVal');
     adxEl.textContent = adx.toFixed(0);
-    adxEl.className = 'explain-val ' + (adx >= 25 ? 'up' : adx >= 20 ? 'warn' : 'down');
+    adxEl.className = 'tile-val ' + (adx >= 25 ? 'up' : adx >= 20 ? 'warn' : 'down');
     if (adx < 20)       setSignal('adxSignal', '🔴 CHOPPY — No real trend. DO NOT TRADE. All signals unreliable', 'red');
     else if (adx < 25)  setSignal('adxSignal', '🟡 WEAK TREND — Trend forming, wait for confirmation', 'orange');
     else if (adx < 35)  setSignal('adxSignal', '🟢 TRENDING — Good conditions, signals are reliable', 'green');
@@ -997,7 +930,7 @@ function showResults(d) {
     var vr = ind.vol_ratio;
     var vrEl = document.getElementById('volRatioVal');
     vrEl.textContent = vr.toFixed(2) + 'x';
-    vrEl.className = 'explain-val ' + (!ind.vol_valid ? 'warn' : vr > 1.5 ? 'up' : '');
+    vrEl.className = 'tile-val ' + (!ind.vol_valid ? 'warn' : vr > 1.5 ? 'up' : '');
     if (vr < 0.3)       setSignal('volSignal', '🔴 VERY LOW VOLUME — Price moves unreliable, be careful', 'red');
     else if (vr < 0.7)  setSignal('volSignal', '🟡 LOW VOLUME — Treat signals with caution', 'orange');
     else if (vr < 1.5)  setSignal('volSignal', '🟢 NORMAL VOLUME — Healthy trading activity', 'green');
@@ -1008,7 +941,7 @@ function showResults(d) {
     var sma = ind.sma20;
     var smaEl = document.getElementById('sma20Val');
     smaEl.textContent = fmt(sma);
-    smaEl.className = 'explain-val ' + (lastPrice > sma ? 'up' : 'down');
+    smaEl.className = 'tile-val ' + (lastPrice > sma ? 'up' : 'down');
     setSignal('smaSignal',
       lastPrice > sma ? '🟢 PRICE ABOVE SMA20 — Bullish uptrend in place' : '🔴 PRICE BELOW SMA20 — Bearish downtrend in place',
       lastPrice > sma ? 'green' : 'red');
@@ -1019,7 +952,7 @@ function showResults(d) {
     var fg = d.fear_greed;
     var fgEl = document.getElementById('fgVal');
     fgEl.textContent = fg.value + ' — ' + fg.label;
-    fgEl.className = 'explain-val ' + (fg.value >= 60 ? 'up' : fg.value <= 30 ? 'down' : 'warn');
+    fgEl.className = 'tile-val ' + (fg.value >= 60 ? 'up' : fg.value <= 30 ? 'down' : 'warn');
     if (fg.value <= 25)       setSignal('fgSignal', '🟢 EXTREME FEAR — Historically great BUY zone', 'green');
     else if (fg.value <= 45)  setSignal('fgSignal', '🟡 FEAR — Market nervous, potential opportunity', 'orange');
     else if (fg.value <= 55)  setSignal('fgSignal', '⚪ NEUTRAL — No strong sentiment', 'neutral');
@@ -1028,7 +961,7 @@ function showResults(d) {
   } else {
     var fgEl = document.getElementById('fgVal');
     fgEl.textContent = 'N/A';
-    fgEl.className = 'explain-val';
+    fgEl.className = 'tile-val';
     setSignal('fgSignal', '⚪ Data unavailable', 'neutral');
   }
 
@@ -1037,7 +970,7 @@ function showResults(d) {
     var fundEl = document.getElementById('fundingVal');
     var rate = d.funding.rate;
     fundEl.textContent = rate !== null ? (rate.toFixed(3) + '%') : 'N/A';
-    fundEl.className = 'explain-val ' + (d.funding.label === 'Overcrowded Longs' ? 'warn' : d.funding.label === 'Overcrowded Shorts' ? 'up' : '');
+    fundEl.className = 'tile-val ' + (d.funding.label === 'Overcrowded Longs' ? 'warn' : d.funding.label === 'Overcrowded Shorts' ? 'up' : '');
     if (rate === null)      setSignal('fundingSignal', '⚪ Data unavailable', 'neutral');
     else if (rate < -0.05)  setSignal('fundingSignal', '🟢 TOO MANY SHORTS — Short squeeze likely, price may spike UP', 'green');
     else if (rate < -0.01)  setSignal('fundingSignal', '🟢 SHORTS CROWDED — Bullish lean, upward bias', 'green');
@@ -1050,7 +983,7 @@ function showResults(d) {
     var etfEl = document.getElementById('etfVal');
     var etf = d.etf_flows.total;
     etfEl.textContent = (etf > 0 ? '+' : '') + etf.toFixed(0) + 'M';
-    etfEl.className = 'explain-val ' + (etf > 0 ? 'up' : 'down');
+    etfEl.className = 'tile-val ' + (etf > 0 ? 'up' : 'down');
     if (etf > 300)       setSignal('etfSignal', '🟢 STRONG INFLOWS — Institutions buying heavily, very bullish', 'green');
     else if (etf > 0)    setSignal('etfSignal', '🟢 INFLOWS — Institutions buying, mild bullish', 'green');
     else if (etf > -300) setSignal('etfSignal', '🔴 OUTFLOWS — Institutions selling, mild bearish', 'red');
@@ -1433,6 +1366,12 @@ function loadAccuracy() {
     }).catch(function() {
       document.getElementById('accuracyList').innerHTML = '<div class="acc-empty">Could not load accuracy data.</div>';
     });
+}
+
+function toggleTile(id) {
+  var el = document.getElementById(id);
+  if (!el) return;
+  el.classList.toggle('hidden');
 }
 
 livePx();

@@ -1513,6 +1513,11 @@ function showTradeScore(d) {
   el.classList.toggle('hidden');
 }
 
+function toggleTile(id) {
+  var el = document.getElementById(id);
+  if (el) el.classList.toggle('hidden');
+}
+
 livePx();
 updatePctChange();
 setInterval(livePx, 1000);

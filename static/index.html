@@ -252,21 +252,33 @@ canvas{width:100%!important;height:100%!important}
 
     <!-- Trading Score -->
     <div class="card" id="scoreCard" style="display:none">
-      <div class="card-title">Should I Trade? — Overall Score</div>
-
-      <!-- Big overall percentage -->
-      <div style="text-align:center;padding:16px 0;border-bottom:1px solid var(--border);margin-bottom:14px">
-        <div style="font-size:72px;font-weight:900;line-height:1" id="scoreNum">-</div>
-        <div style="font-size:14px;font-weight:700;margin-top:6px" id="scoreLabel">-</div>
-        <div style="font-size:12px;color:var(--muted2);margin-top:4px" id="scoreDesc">-</div>
-        <div style="background:var(--border);border-radius:99px;height:10px;margin-top:12px;overflow:hidden">
-          <div id="scoreBar" style="height:100%;border-radius:99px;width:0%;transition:width 1s ease"></div>
+      <div class="card-title">Should I Trade?</div>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+        <!-- Score circle -->
+        <div style="position:relative;width:72px;height:72px;flex-shrink:0">
+          <svg width="72" height="72" viewBox="0 0 72 72">
+            <circle cx="36" cy="36" r="30" fill="none" stroke="var(--border)" stroke-width="6"/>
+            <circle id="scoreCircle" cx="36" cy="36" r="30" fill="none" stroke="var(--red)" stroke-width="6"
+              stroke-dasharray="188.5" stroke-dashoffset="188.5"
+              stroke-linecap="round" transform="rotate(-90 36 36)"
+              style="transition:stroke-dashoffset 1s ease,stroke 0.5s ease"/>
+          </svg>
+          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">
+            <div style="font-size:18px;font-weight:900;line-height:1" id="scoreNum">-</div>
+            <div style="font-size:8px;color:var(--muted2)">SCORE</div>
+          </div>
+        </div>
+        <!-- Label and bar -->
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:800;margin-bottom:3px" id="scoreLabel">-</div>
+          <div style="font-size:11px;color:var(--muted2);margin-bottom:6px" id="scoreDesc">-</div>
+          <div style="background:var(--border);border-radius:99px;height:4px;overflow:hidden">
+            <div id="scoreBar" style="height:100%;border-radius:99px;width:0%;transition:width 1s ease"></div>
+          </div>
         </div>
       </div>
-
-      <!-- Per-signal breakdown with % -->
-      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Signal breakdown</div>
-      <div id="scoreBreakdown"></div>
+      <!-- Compact signal grid -->
+      <div id="scoreBreakdown" style="display:grid;grid-template-columns:1fr 1fr;gap:5px"></div>
     </div>
 
     <!-- Position Sizing (advisory) -->
@@ -1470,42 +1482,47 @@ function showTradeScore(d) {
   var total = res.total;
   var color = total >= 70 ? 'var(--green)' : total >= 50 ? 'var(--orange)' : 'var(--red)';
 
-  var label = total >= 80 ? 'STRONG SIGNAL — High conviction to trade' :
-              total >= 70 ? 'GOOD SIGNAL — Trade with discipline & stop loss' :
-              total >= 55 ? 'MODERATE — Very small position only' :
-              total >= 35 ? 'WEAK SIGNAL — Better to wait' :
-                            'DO NOT TRADE — Conditions not favorable';
+  var label = total >= 80 ? '🟢 STRONG SIGNAL' :
+              total >= 70 ? '🟢 GOOD SIGNAL' :
+              total >= 55 ? '🟡 MODERATE' :
+              total >= 35 ? '🟡 WEAK SIGNAL' : '🔴 DO NOT TRADE';
 
-  var desc  = total >= 80 ? 'Most factors align. Enter trade, set stop loss immediately, respect it.' :
-              total >= 70 ? 'Good but not perfect setup. Reduce position size by 50%.' :
-              total >= 55 ? 'Mixed signals. If you enter, use minimal size and tight stop.' :
-              total >= 35 ? 'Too many negatives. Wait for a better opportunity.' :
-                            'Choppy market, low confidence, or small predicted move. Stay out.';
+  var desc  = total >= 80 ? 'Strong setup. Trade with stop loss.' :
+              total >= 70 ? 'Good setup. Reduce size by 50%.' :
+              total >= 55 ? 'Mixed signals. Minimal size only.' :
+              total >= 35 ? 'Too many negatives. Wait.' :
+                            'Choppy market or small move. Stay out.';
 
-  document.getElementById('scoreNum').textContent  = total + '%';
-  document.getElementById('scoreNum').style.color  = color;
+  // Update score circle
+  document.getElementById('scoreNum').textContent = total + '%';
+  document.getElementById('scoreNum').style.color = color;
+  var circle = document.getElementById('scoreCircle');
+  if (circle) {
+    var circumference = 188.5;
+    var offset = circumference - (total / 100 * circumference);
+    circle.style.strokeDashoffset = offset;
+    circle.style.stroke = color;
+  }
   document.getElementById('scoreLabel').textContent = label;
   document.getElementById('scoreLabel').style.color = color;
   document.getElementById('scoreDesc').textContent  = desc;
   document.getElementById('scoreBar').style.width   = total + '%';
   document.getElementById('scoreBar').style.background = color;
 
+  // Compact 2-column grid
   var html = '';
   res.signals.forEach(function(s) {
     var sColor = s.pct >= 70 ? 'var(--green)' : s.pct >= 40 ? 'var(--orange)' : 'var(--red)';
     var icon   = s.pct >= 70 ? '🟢' : s.pct >= 40 ? '🟡' : '🔴';
-    html += '<div style="margin-bottom:10px">' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">' +
-        '<div>' +
-          '<span style="font-size:12px;font-weight:700;color:var(--text)">' + icon + ' ' + s.name + '</span><br>' +
-          '<span style="font-size:10px;color:var(--muted2)">' + s.what + '</span>' +
-        '</div>' +
-        '<span style="font-size:20px;font-weight:900;color:' + sColor + '">' + s.pct + '%</span>' +
+    html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:8px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' +
+        '<span style="font-size:10px;font-weight:700;color:var(--muted2)">' + icon + ' ' + s.name.split(' ')[0] + '</span>' +
+        '<span style="font-size:14px;font-weight:900;color:' + sColor + '">' + s.pct + '%</span>' +
       '</div>' +
-      '<div style="background:var(--border);border-radius:99px;height:5px;overflow:hidden;margin-bottom:2px">' +
+      '<div style="background:var(--border);border-radius:99px;height:3px;overflow:hidden">' +
         '<div style="height:100%;border-radius:99px;width:' + s.pct + '%;background:' + sColor + '"></div>' +
       '</div>' +
-      '<div style="font-size:10px;color:var(--muted2)">' + s.detail + '</div>' +
+      '<div style="font-size:9px;color:var(--muted);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + s.detail.split('(')[0].trim() + '</div>' +
     '</div>';
   });
   document.getElementById('scoreBreakdown').innerHTML = html;

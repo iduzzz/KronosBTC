@@ -148,7 +148,12 @@ canvas{width:100%!important;height:100%!important}
     </div>
   </div>
   <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
-    <div class="drawer-section-title">App Info</div>
+    <div class="drawer-section-title">Real Money Trading Journal</div>
+    <button onclick="closeDrawer();showJournal()" style="width:100%;padding:12px;background:linear-gradient(135deg,#059669,#065f46);color:white;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer;margin-bottom:6px">
+      📒 Open Trading Journal
+    </button>
+    <div style="font-size:11px;color:var(--muted2)">Log real trades, track P&L, measure actual accuracy</div>
+  </div>
     <div class="info-row"><span class="info-label">Model</span><span class="info-val">Kronos-base 102M</span></div>
     <div class="info-row"><span class="info-label">Device</span><span class="info-val" id="infoDevice">-</span></div>
     <div class="info-row"><span class="info-label">Monte Carlo N</span><span class="info-val" id="infoN">-</span></div>
@@ -1513,6 +1518,246 @@ updatePctChange();
 setInterval(livePx, 1000);
 setInterval(updatePctChange, 10000);
 checkStatus();
+</script>
+<!-- Trading Journal Modal -->
+<div id="journalOverlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.7);z-index:2000;overflow-y:auto">
+  <div style="background:var(--card);min-height:100vh;padding:20px">
+
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;padding-top:env(safe-area-inset-top)">
+      <div style="font-size:18px;font-weight:700">📒 Real Money Journal</div>
+      <button onclick="hideJournal()" style="background:rgba(255,255,255,.1);border:none;color:var(--text);font-size:20px;width:36px;height:36px;border-radius:8px;cursor:pointer">✕</button>
+    </div>
+
+    <!-- Summary -->
+    <div id="journalSummary" style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+      <div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Summary</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+        <div style="text-align:center"><div style="font-size:22px;font-weight:800" id="jTotalPnl">-</div><div style="font-size:10px;color:var(--muted2)">Total P&L ($)</div></div>
+        <div style="text-align:center"><div style="font-size:22px;font-weight:800" id="jWinRate">-</div><div style="font-size:10px;color:var(--muted2)">Win Rate</div></div>
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700" id="jTotalTrades">-</div><div style="font-size:10px;color:var(--muted2)">Closed Trades</div></div>
+        <div style="text-align:center"><div style="font-size:18px;font-weight:700" id="jTotalInvested">-</div><div style="font-size:10px;color:var(--muted2)">Total Invested ($)</div></div>
+      </div>
+    </div>
+
+    <!-- Log New Trade -->
+    <div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px">Log New Trade</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+        <div>
+          <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Coin</div>
+          <select id="jCoin" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+            <option>ZEC</option><option>BTC</option><option>TAO</option><option>ETH</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Direction</div>
+          <select id="jDirection" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+            <option value="LONG">LONG (Buy)</option><option value="SHORT">SHORT (Sell)</option>
+          </select>
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Entry Price ($)</div>
+          <input type="number" id="jEntryPrice" placeholder="e.g. 465.50" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+        </div>
+        <div>
+          <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Amount Invested ($)</div>
+          <input type="number" id="jAmount" placeholder="e.g. 500" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+        </div>
+      </div>
+      <div style="margin-bottom:8px">
+        <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Entry Date &amp; Time</div>
+        <input type="datetime-local" id="jEntryTime" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Notes (optional)</div>
+        <input type="text" id="jNotes" placeholder="Why did you enter this trade?" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
+      </div>
+      <button onclick="logTrade()" style="width:100%;padding:12px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:10px;font-size:14px;font-weight:700;cursor:pointer">
+        + Log Trade
+      </button>
+      <div id="jLogMsg" style="font-size:12px;text-align:center;margin-top:6px;display:none"></div>
+    </div>
+
+    <!-- Open Trades -->
+    <div style="font-size:13px;font-weight:700;margin-bottom:8px">Open Trades</div>
+    <div id="jOpenTrades"><div style="color:var(--muted2);font-size:13px;text-align:center;padding:16px">No open trades</div></div>
+
+    <!-- Closed Trades -->
+    <div style="font-size:13px;font-weight:700;margin:14px 0 8px">Trade History</div>
+    <div id="jClosedTrades"><div style="color:var(--muted2);font-size:13px;text-align:center;padding:16px">No closed trades yet</div></div>
+
+  </div>
+</div>
+
+<!-- Close Trade Modal -->
+<div id="closeTradeModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--card);border:1px solid var(--border);border-radius:16px;padding:20px;z-index:3000;width:300px">
+  <div style="font-size:15px;font-weight:700;margin-bottom:12px">Close Trade</div>
+  <input type="hidden" id="closeTradeId">
+  <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Exit Price ($)</div>
+  <input type="number" id="closeExitPrice" placeholder="Current market price" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin-bottom:8px">
+  <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Exit Date &amp; Time</div>
+  <input type="datetime-local" id="closeExitTime" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px;margin-bottom:12px">
+  <div style="display:flex;gap:8px">
+    <button onclick="document.getElementById('closeTradeModal').style.display='none'" style="flex:1;padding:10px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);cursor:pointer">Cancel</button>
+    <button onclick="submitClose()" style="flex:1;padding:10px;background:var(--green);border:none;border-radius:8px;color:white;font-weight:700;cursor:pointer">Close Trade</button>
+  </div>
+</div>
+
+<script>
+</script>
+<script>
+// ── Trading Journal ──────────────────────────────────────────────────────────
+function showJournal() {
+  var now = new Date();
+  now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+  document.getElementById('jEntryTime').value = now.toISOString().slice(0,16);
+  var ct = document.getElementById('closeExitTime');
+  if (ct) ct.value = now.toISOString().slice(0,16);
+  document.getElementById('journalOverlay').style.display = 'block';
+  loadJournal();
+}
+
+function hideJournal() {
+  document.getElementById('journalOverlay').style.display = 'none';
+}
+
+function loadJournal() {
+  fetch(BASE + '/real_trades')
+    .then(function(r){ return r.json(); })
+    .then(function(data) {
+      var s = data.summary || {};
+      var pEl = document.getElementById('jTotalPnl');
+      pEl.textContent = (s.total_pnl_usd >= 0 ? '+' : '') + '$' + (s.total_pnl_usd||0).toFixed(2);
+      pEl.style.color = s.total_pnl_usd >= 0 ? 'var(--green)' : 'var(--red)';
+      var wEl = document.getElementById('jWinRate');
+      wEl.textContent = (s.win_rate||0) + '%';
+      wEl.style.color = s.win_rate >= 50 ? 'var(--green)' : 'var(--red)';
+      document.getElementById('jTotalTrades').textContent = s.total_trades || 0;
+      document.getElementById('jTotalInvested').textContent = '$' + (s.total_invested||0).toFixed(0);
+
+      // Open trades
+      var openEl = document.getElementById('jOpenTrades');
+      if (!data.open || !data.open.length) {
+        openEl.innerHTML = '<div style="color:var(--muted2);font-size:13px;text-align:center;padding:16px">No open trades</div>';
+      } else {
+        var h = '';
+        data.open.forEach(function(t) {
+          var dc = t.direction==='LONG' ? 'var(--green)' : 'var(--red)';
+          h += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:12px;margin-bottom:8px">' +
+            '<div style="display:flex;justify-content:space-between;margin-bottom:8px">' +
+              '<div><span style="font-size:15px;font-weight:700;color:'+dc+'">'+t.symbol+' '+t.direction+'</span><br>' +
+              '<span style="font-size:11px;color:var(--muted2)">Entry: $'+t.entry_price+' | Invested: $'+t.amount_usd+'</span><br>' +
+              '<span style="font-size:10px;color:var(--muted)">'+new Date(t.entry_time).toLocaleString()+'</span></div>' +
+              '<div style="text-align:right"><div style="font-size:18px;font-weight:800" id="livepnl-'+t.id+'">...</div><div style="font-size:10px;color:var(--muted2)">Live P&L</div></div>' +
+            '</div>' +
+            (t.app_signal ? '<div style="font-size:10px;color:var(--muted2);margin-bottom:6px">App: '+t.app_signal+' | Upside: '+(t.app_upside_prob||'N/A')+'% | Target: $'+(t.app_predicted_price ? t.app_predicted_price.toFixed(2) : 'N/A')+'</div>' : '') +
+            (t.notes ? '<div style="font-size:11px;color:var(--muted2);font-style:italic;margin-bottom:6px">'+t.notes+'</div>' : '') +
+            '<div style="display:flex;gap:6px">' +
+              '<button onclick="openCloseModal('+t.id+')" style="flex:1;padding:8px;background:var(--green);border:none;border-radius:8px;color:white;font-weight:700;cursor:pointer;font-size:12px">Close Trade</button>' +
+              '<button onclick="deleteTrade('+t.id+')" style="padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--red);cursor:pointer;font-size:12px">Delete</button>' +
+            '</div></div>';
+        });
+        openEl.innerHTML = h;
+        data.open.forEach(function(t){ updateLivePnl(t); });
+      }
+
+      // Closed trades
+      var closedEl = document.getElementById('jClosedTrades');
+      if (!data.closed || !data.closed.length) {
+        closedEl.innerHTML = '<div style="color:var(--muted2);font-size:13px;text-align:center;padding:16px">No closed trades yet</div>';
+      } else {
+        var h = '';
+        data.closed.forEach(function(t) {
+          var pc = t.pnl_usd >= 0 ? 'var(--green)' : 'var(--red)';
+          var dc = t.direction==='LONG' ? 'var(--green)' : 'var(--red)';
+          h += '<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)">' +
+            '<div><span style="font-weight:700;color:'+dc+'">'+t.symbol+' '+t.direction+'</span><br>' +
+            '<span style="font-size:11px;color:var(--muted2)">$'+t.entry_price+' → $'+t.exit_price+'</span><br>' +
+            '<span style="font-size:10px;color:var(--muted)">'+new Date(t.entry_time).toLocaleDateString()+'</span></div>' +
+            '<div style="text-align:right"><div style="font-size:16px;font-weight:800;color:'+pc+'">'+(t.pnl_usd>=0?'+':'')+'$'+t.pnl_usd.toFixed(2)+'</div>' +
+            '<div style="font-size:11px;color:'+pc+'">'+(t.pnl_pct>=0?'+':'')+t.pnl_pct.toFixed(2)+'%</div></div>' +
+          '</div>';
+        });
+        closedEl.innerHTML = h;
+      }
+    }).catch(function(e){ console.error('Journal:', e); });
+}
+
+function updateLivePnl(trade) {
+  var sym = BSYMS[trade.symbol];
+  if (!sym) return;
+  fetch('https://api.binance.com/api/v3/ticker/price?symbol='+sym)
+    .then(function(r){ return r.json(); })
+    .then(function(d) {
+      var price = parseFloat(d.price);
+      var pnl = trade.direction==='LONG'
+        ? (price - trade.entry_price) * trade.quantity
+        : (trade.entry_price - price) * trade.quantity;
+      var pct = pnl / trade.amount_usd * 100;
+      var el = document.getElementById('livepnl-'+trade.id);
+      if (el) {
+        el.textContent = (pnl>=0?'+':'')+'$'+pnl.toFixed(2)+' ('+(pct>=0?'+':'')+pct.toFixed(2)+'%)';
+        el.style.color = pnl>=0 ? 'var(--green)' : 'var(--red)';
+      }
+    }).catch(function(){});
+}
+
+function logTrade() {
+  var coin  = document.getElementById('jCoin').value;
+  var dir   = document.getElementById('jDirection').value;
+  var price = parseFloat(document.getElementById('jEntryPrice').value);
+  var amt   = parseFloat(document.getElementById('jAmount').value);
+  var time  = document.getElementById('jEntryTime').value;
+  var notes = document.getElementById('jNotes').value;
+  var msgEl = document.getElementById('jLogMsg');
+
+  if (!price || !amt || price<=0 || amt<=0) {
+    msgEl.textContent='Please enter valid entry price and amount.';
+    msgEl.style.color='var(--red)'; msgEl.style.display='block'; return;
+  }
+  fetch(BASE+'/real_trades/open', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({symbol:coin,direction:dir,entry_price:price,
+      amount_usd:amt,entry_time:new Date(time).toISOString(),notes:notes})
+  }).then(function(r){ return r.json(); })
+    .then(function(d) {
+      if (d.status==='ok') {
+        msgEl.textContent='Trade logged!'; msgEl.style.color='var(--green)'; msgEl.style.display='block';
+        document.getElementById('jEntryPrice').value='';
+        document.getElementById('jAmount').value='';
+        document.getElementById('jNotes').value='';
+        setTimeout(function(){ msgEl.style.display='none'; loadJournal(); }, 1500);
+      } else { msgEl.textContent='Error: '+d.error; msgEl.style.color='var(--red)'; msgEl.style.display='block'; }
+    }).catch(function(){ msgEl.textContent='Connection error.'; msgEl.style.color='var(--red)'; msgEl.style.display='block'; });
+}
+
+function openCloseModal(id) {
+  document.getElementById('closeTradeId').value = id;
+  document.getElementById('closeExitPrice').value = '';
+  var now = new Date(); now.setMinutes(now.getMinutes()-now.getTimezoneOffset());
+  document.getElementById('closeExitTime').value = now.toISOString().slice(0,16);
+  document.getElementById('closeTradeModal').style.display = 'block';
+}
+
+function submitClose() {
+  var id    = parseInt(document.getElementById('closeTradeId').value);
+  var price = parseFloat(document.getElementById('closeExitPrice').value);
+  var time  = document.getElementById('closeExitTime').value;
+  if (!price||price<=0) { alert('Please enter exit price'); return; }
+  fetch(BASE+'/real_trades/close/'+id, {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({exit_price:price, exit_time:new Date(time).toISOString()})
+  }).then(function(r){ return r.json(); })
+    .then(function(){ document.getElementById('closeTradeModal').style.display='none'; loadJournal(); })
+    .catch(function(){});
+}
+
+function deleteTrade(id) {
+  if (!confirm('Delete this trade? Cannot be undone.')) return;
+  fetch(BASE+'/real_trades/delete/'+id, {method:'POST'})
+    .then(function(){ loadJournal(); }).catch(function(){});
+}
 </script>
 </body>
 </html>

@@ -1537,6 +1537,10 @@ function toggleTile(id) {
   if (el) el.classList.toggle('hidden');
 }
 
+function toggleDetail(id) {
+  toggleTile(id);
+}
+
 livePx();
 updatePctChange();
 setInterval(livePx, 1000);

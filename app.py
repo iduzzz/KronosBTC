@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 import numpy as np
 import pandas as pd
 import requests
-from flask import Flask, jsonify, send_from_directory
+from flask import Flask, jsonify, send_from_directory, request
 from flask_cors import CORS
 import torch
 
@@ -123,7 +123,25 @@ def init_db():
             )
         """)
         conn.execute("""
-            CREATE TABLE IF NOT EXISTS prediction_failures (
+            CREATE TABLE IF NOT EXISTS real_trades (
+                id             INTEGER PRIMARY KEY AUTOINCREMENT,
+                symbol         TEXT NOT NULL,
+                direction      TEXT NOT NULL,
+                entry_price    REAL NOT NULL,
+                entry_time     TEXT NOT NULL,
+                amount_usd     REAL NOT NULL,
+                quantity       REAL NOT NULL,
+                app_upside_prob REAL,
+                app_predicted_price REAL,
+                app_signal     TEXT,
+                exit_price     REAL,
+                exit_time      TEXT,
+                pnl_usd        REAL,
+                pnl_pct        REAL,
+                notes          TEXT,
+                closed         INTEGER DEFAULT 0
+            )
+        """)
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol    TEXT NOT NULL,
                 failed_at TEXT NOT NULL,
@@ -1281,6 +1299,130 @@ def predict(symbol):
     except Exception:
         pass
     return jsonify({"status": "queued"})
+
+@app.route("/real_trades", methods=["GET"])
+def get_real_trades():
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            open_trades = conn.execute("""
+                SELECT id, symbol, direction, entry_price, entry_time,
+                       amount_usd, quantity, app_upside_prob, app_predicted_price,
+                       app_signal, notes
+                FROM real_trades WHERE closed=0
+                ORDER BY entry_time DESC
+            """).fetchall()
+            closed_trades = conn.execute("""
+                SELECT id, symbol, direction, entry_price, entry_time,
+                       exit_price, exit_time, amount_usd, pnl_usd, pnl_pct, notes
+                FROM real_trades WHERE closed=1
+                ORDER BY exit_time DESC LIMIT 50
+            """).fetchall()
+            summary = conn.execute("""
+                SELECT COUNT(*) as total,
+                       SUM(CASE WHEN pnl_usd > 0 THEN 1 ELSE 0 END) as wins,
+                       SUM(pnl_usd) as total_pnl,
+                       SUM(amount_usd) as total_invested
+                FROM real_trades WHERE closed=1
+            """).fetchone()
+        return jsonify({
+            "open": [{"id":r[0],"symbol":r[1],"direction":r[2],"entry_price":r[3],
+                      "entry_time":r[4],"amount_usd":r[5],"quantity":r[6],
+                      "app_upside_prob":r[7],"app_predicted_price":r[8],
+                      "app_signal":r[9],"notes":r[10]} for r in open_trades],
+            "closed": [{"id":r[0],"symbol":r[1],"direction":r[2],"entry_price":r[3],
+                        "entry_time":r[4],"exit_price":r[5],"exit_time":r[6],
+                        "amount_usd":r[7],"pnl_usd":r[8],"pnl_pct":r[9],"notes":r[10]} for r in closed_trades],
+            "summary": {
+                "total_trades": summary[0] or 0,
+                "wins": summary[1] or 0,
+                "total_pnl_usd": round(summary[2] or 0, 2),
+                "total_invested": round(summary[3] or 0, 2),
+                "win_rate": round((summary[1] or 0) / max(summary[0] or 1, 1) * 100, 1)
+            }
+        })
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/real_trades/open", methods=["POST"])
+def open_real_trade():
+    try:
+        data       = request.get_json()
+        symbol     = data["symbol"].upper()
+        direction  = data["direction"].upper()
+        entry_price= float(data["entry_price"])
+        amount_usd = float(data["amount_usd"])
+        quantity   = amount_usd / entry_price
+        entry_time = data.get("entry_time", datetime.now(timezone.utc).isoformat())
+        notes      = data.get("notes", "")
+
+        # Capture current app prediction if available
+        app_upside_prob = None
+        app_predicted_price = None
+        app_signal = None
+        if symbol in cache:
+            c = cache[symbol]
+            app_upside_prob = c.get("upside_prob")
+            fc = c.get("forecast", {})
+            if fc.get("mean_close"):
+                app_predicted_price = fc["mean_close"][-1]
+            app_signal = c.get("signal_context", {}).get("trade_signal")
+
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("""
+                    INSERT INTO real_trades
+                    (symbol, direction, entry_price, entry_time, amount_usd, quantity,
+                     app_upside_prob, app_predicted_price, app_signal, notes)
+                    VALUES (?,?,?,?,?,?,?,?,?,?)
+                """, (symbol, direction, entry_price, entry_time, amount_usd, quantity,
+                      app_upside_prob, app_predicted_price, app_signal, notes))
+                conn.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/real_trades/close/<int:trade_id>", methods=["POST"])
+def close_real_trade(trade_id):
+    try:
+        data       = request.get_json()
+        exit_price = float(data["exit_price"])
+        exit_time  = data.get("exit_time", datetime.now(timezone.utc).isoformat())
+
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                trade = conn.execute(
+                    "SELECT direction, entry_price, amount_usd, quantity FROM real_trades WHERE id=?",
+                    (trade_id,)).fetchone()
+                if not trade:
+                    return jsonify({"error": "Trade not found"}), 404
+
+                direction, entry_price, amount_usd, quantity = trade
+                if direction == "LONG":
+                    pnl_usd = (exit_price - entry_price) * quantity
+                else:
+                    pnl_usd = (entry_price - exit_price) * quantity
+                pnl_pct = pnl_usd / amount_usd * 100
+
+                conn.execute("""
+                    UPDATE real_trades
+                    SET exit_price=?, exit_time=?, pnl_usd=?, pnl_pct=?, closed=1
+                    WHERE id=?
+                """, (exit_price, exit_time, round(pnl_usd, 2), round(pnl_pct, 3), trade_id))
+                conn.commit()
+        return jsonify({"status": "ok", "pnl_usd": round(pnl_usd, 2), "pnl_pct": round(pnl_pct, 2)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/real_trades/delete/<int:trade_id>", methods=["POST"])
+def delete_real_trade(trade_id):
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("DELETE FROM real_trades WHERE id=?", (trade_id,))
+                conn.commit()
+        return jsonify({"status": "ok"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.route("/accuracy")
 def accuracy_route():

@@ -243,6 +243,25 @@ canvas{width:100%!important;height:100%!important}
       <div style="font-size:12px;margin-top:4px" id="tradeReason"></div>
     </div>
 
+    <!-- Trading Score -->
+    <div class="card" id="scoreCard" style="display:none">
+      <div class="card-title">Should I Trade? — Overall Score</div>
+
+      <!-- Big overall percentage -->
+      <div style="text-align:center;padding:16px 0;border-bottom:1px solid var(--border);margin-bottom:14px">
+        <div style="font-size:72px;font-weight:900;line-height:1" id="scoreNum">-</div>
+        <div style="font-size:14px;font-weight:700;margin-top:6px" id="scoreLabel">-</div>
+        <div style="font-size:12px;color:var(--muted2);margin-top:4px" id="scoreDesc">-</div>
+        <div style="background:var(--border);border-radius:99px;height:10px;margin-top:12px;overflow:hidden">
+          <div id="scoreBar" style="height:100%;border-radius:99px;width:0%;transition:width 1s ease"></div>
+        </div>
+      </div>
+
+      <!-- Per-signal breakdown with % -->
+      <div style="font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Signal breakdown</div>
+      <div id="scoreBreakdown"></div>
+    </div>
+
     <!-- Position Sizing (advisory) -->
     <div id="positionCard" class="card hidden">
       <div class="card-title">Position Sizing (Advisory - Adjust to Your Capital)</div>
@@ -797,6 +816,9 @@ function showResults(d) {
       window._lastSignal = sig;
     }
   }
+
+  // Trading score
+  showTradeScore(d);
 
   // Regime badge (#8)
   var regime = sc.regime || (d.indicators && d.indicators.regime) || 'Unknown';
@@ -1368,7 +1390,119 @@ function loadAccuracy() {
     });
 }
 
-function toggleTile(id) {
+function computeTradeScore(d) {
+  var sc       = d.signal_context || {};
+  var adx      = sc.adx || (d.indicators && d.indicators.adx) || 0;
+  var nConf    = sc.n_confirm || 0;
+  var nWarn    = sc.n_warn || 0;
+  var conf     = d.confidence || 0;
+  var hall     = d.hallucinating || false;
+  var up       = d.upside_prob || 50;
+  var accPct   = (d.accuracy && d.accuracy.total >= 5) ? d.accuracy.pct : 50;
+  var fc       = d.forecast;
+  var predMove = fc ? Math.abs(fc.mean_close[fc.mean_close.length-1] - d.last_price) / d.last_price * 100 : 0;
+
+  var signals = [
+    {
+      name: 'Kronos Signal Strength',
+      what: 'How bullish/bearish is the AI prediction?',
+      pct: Math.min(Math.round(Math.abs(up - 50) * 2.2), 100),
+      detail: 'Upside probability: ' + up + '% (neutral = 50%)'
+    },
+    {
+      name: 'Market Regime (ADX)',
+      what: 'Is the market trending or choppy?',
+      pct: adx >= 35 ? 100 : adx >= 25 ? 75 : adx >= 20 ? 35 : 0,
+      detail: 'ADX = ' + adx.toFixed(0) + (adx < 20 ? ' — CHOPPY, do not trade' : adx < 25 ? ' — Weak trend' : adx < 35 ? ' — Trending' : ' — Strong trend')
+    },
+    {
+      name: 'Signal Confirmations',
+      what: 'Do RSI, MACD, funding etc. agree with Kronos?',
+      pct: Math.max(0, Math.min(100, Math.round((nConf * 33) - (nWarn * 40)))),
+      detail: nConf + ' signals confirm, ' + nWarn + ' signals warn against'
+    },
+    {
+      name: 'Model Confidence',
+      what: 'Is the AI certain or guessing?',
+      pct: hall ? 0 : Math.min(Math.round(conf), 100),
+      detail: hall ? 'HALLUCINATING — AI predicted range too narrow, do not trust' : 'Confidence: ' + conf + '%'
+    },
+    {
+      name: 'Historical Accuracy',
+      what: 'How often has this coin been right before?',
+      pct: (d.accuracy && d.accuracy.total >= 5) ? Math.round(accPct) : 50,
+      detail: (d.accuracy && d.accuracy.total >= 5)
+        ? accPct + '% correct over ' + d.accuracy.total + ' past predictions'
+        : 'Not enough data yet (need 5+ predictions)'
+    },
+    {
+      name: 'Predicted Move Size',
+      what: 'Is the predicted move big enough to profit after commissions?',
+      pct: predMove >= 5 ? 100 : predMove >= 3 ? 70 : predMove >= 2 ? 40 : predMove >= 1 ? 15 : 0,
+      detail: 'Predicted move: ' + predMove.toFixed(1) + '% (need 3%+ to profit after fees)'
+    }
+  ];
+
+  var weights = [0.25, 0.20, 0.15, 0.15, 0.15, 0.10];
+  var total = 0;
+  signals.forEach(function(s, i) { total += s.pct * weights[i]; });
+  total = Math.round(total);
+
+  return { total: total, signals: signals };
+}
+
+function showTradeScore(d) {
+  var card = document.getElementById('scoreCard');
+  if (!card) return;
+
+  var sig = (d.signal_context || {}).trade_signal || 'NO_TRADE';
+  if (sig === 'CIRCUIT_BROKEN') { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+
+  var res   = computeTradeScore(d);
+  var total = res.total;
+  var color = total >= 70 ? 'var(--green)' : total >= 50 ? 'var(--orange)' : 'var(--red)';
+
+  var label = total >= 80 ? 'STRONG SIGNAL — High conviction to trade' :
+              total >= 70 ? 'GOOD SIGNAL — Trade with discipline & stop loss' :
+              total >= 55 ? 'MODERATE — Very small position only' :
+              total >= 35 ? 'WEAK SIGNAL — Better to wait' :
+                            'DO NOT TRADE — Conditions not favorable';
+
+  var desc  = total >= 80 ? 'Most factors align. Enter trade, set stop loss immediately, respect it.' :
+              total >= 70 ? 'Good but not perfect setup. Reduce position size by 50%.' :
+              total >= 55 ? 'Mixed signals. If you enter, use minimal size and tight stop.' :
+              total >= 35 ? 'Too many negatives. Wait for a better opportunity.' :
+                            'Choppy market, low confidence, or small predicted move. Stay out.';
+
+  document.getElementById('scoreNum').textContent  = total + '%';
+  document.getElementById('scoreNum').style.color  = color;
+  document.getElementById('scoreLabel').textContent = label;
+  document.getElementById('scoreLabel').style.color = color;
+  document.getElementById('scoreDesc').textContent  = desc;
+  document.getElementById('scoreBar').style.width   = total + '%';
+  document.getElementById('scoreBar').style.background = color;
+
+  var html = '';
+  res.signals.forEach(function(s) {
+    var sColor = s.pct >= 70 ? 'var(--green)' : s.pct >= 40 ? 'var(--orange)' : 'var(--red)';
+    var icon   = s.pct >= 70 ? '🟢' : s.pct >= 40 ? '🟡' : '🔴';
+    html += '<div style="margin-bottom:10px">' +
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:3px">' +
+        '<div>' +
+          '<span style="font-size:12px;font-weight:700;color:var(--text)">' + icon + ' ' + s.name + '</span><br>' +
+          '<span style="font-size:10px;color:var(--muted2)">' + s.what + '</span>' +
+        '</div>' +
+        '<span style="font-size:20px;font-weight:900;color:' + sColor + '">' + s.pct + '%</span>' +
+      '</div>' +
+      '<div style="background:var(--border);border-radius:99px;height:5px;overflow:hidden;margin-bottom:2px">' +
+        '<div style="height:100%;border-radius:99px;width:' + s.pct + '%;background:' + sColor + '"></div>' +
+      '</div>' +
+      '<div style="font-size:10px;color:var(--muted2)">' + s.detail + '</div>' +
+    '</div>';
+  });
+  document.getElementById('scoreBreakdown').innerHTML = html;
+}
   var el = document.getElementById(id);
   if (!el) return;
   el.classList.toggle('hidden');

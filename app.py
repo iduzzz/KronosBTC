@@ -142,6 +142,8 @@ def init_db():
                 closed         INTEGER DEFAULT 0
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS prediction_failures (
                 id        INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol    TEXT NOT NULL,
                 failed_at TEXT NOT NULL,

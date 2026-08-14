@@ -94,7 +94,15 @@ canvas{width:100%!important;height:100%!important}
 .badge-purple{background:rgba(139,92,246,.1);border:1px solid rgba(139,92,246,.3);color:var(--purple)}
 .badge-red{background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);color:var(--red)}
 .spinner{width:10px;height:10px;border:2px solid rgba(245,158,11,.3);border-top-color:var(--orange);border-radius:50%;animation:spin .8s linear infinite}
-.tile-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.dash-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:7px;padding:8px 0}
+.dash-tile{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color 0.2s;min-height:72px}
+.dash-tile:active{border-color:var(--accent);opacity:.85}
+.dash-wide{grid-column:span 2}
+.dt-label{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.dt-val{font-size:18px;font-weight:800;line-height:1;margin-bottom:3px}
+.dt-sub{font-size:10px;color:var(--muted2)}
+.dt-detail{background:var(--card);border:1px solid var(--border);border-radius:8px;padding:8px;margin-top:8px}
+.journal-btn{width:100%;padding:12px;background:linear-gradient(135deg,#059669,#065f46);color:white;border:none;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;margin:8px 0;-webkit-tap-highlight-color:transparent}
 .tile{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:10px;cursor:pointer;-webkit-tap-highlight-color:transparent;transition:border-color 0.2s}
 .tile:active{border-color:var(--accent)}
 .tile-name{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
@@ -214,6 +222,9 @@ canvas{width:100%!important;height:100%!important}
 <div class="content">
   <div class="status-row" id="statusRow"><span>...</span><span>Connecting...</span></div>
 
+  <!-- Trading Journal — always visible -->
+  <button class="journal-btn" onclick="showJournal()">📒 Real Money Trading Journal</button>
+
   <div class="computing-card" id="computingCard">
     <div class="computing-icon">🧠</div>
     <div class="computing-title" id="computingTitle">Computing Prediction</div>
@@ -238,292 +249,278 @@ canvas{width:100%!important;height:100%!important}
   </div>
 
   <div id="results" class="hidden">
-    <div class="badge-row" style="margin-bottom:4px">
+    <div class="updated" id="updatedTime" style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+      <span id="updatedTimeText" style="font-size:11px;color:var(--muted2)"></span>
       <span class="badge badge-orange hidden" id="refreshBadge"><div class="spinner"></div> Refreshing...</span>
     </div>
-    <div class="updated" id="updatedTime"></div>
 
-    <!-- Trade Signal (advisory) -->
-    <div id="tradeCard" class="trade-card-none">
-      <div style="font-size:11px;color:var(--muted2);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:6px">Advisory Signal</div>
-      <div style="font-size:28px;font-weight:900" id="tradeSignal">-</div>
-      <div style="font-size:12px;margin-top:4px" id="tradeReason"></div>
+    <!-- DASHBOARD GRID -->
+    <div class="dash-grid">
+
+      <!-- 1. Advisory Signal -->
+      <div class="dash-tile dash-wide" id="tradeCard" onclick="toggleDetail('detailSignal')">
+        <div class="dt-label">Advisory Signal</div>
+        <div class="dt-val" id="tradeSignal" style="font-size:22px;font-weight:900">-</div>
+        <div class="dt-sub" id="tradeReason"></div>
+        <div class="dt-detail hidden" id="detailSignal" onclick="event.stopPropagation()">
+          <div style="font-size:11px;color:var(--muted2);margin-top:8px;line-height:1.7">
+            <b>LONG</b> = Kronos &gt;60% + 2 confirms + 0 warnings<br>
+            <b>SHORT</b> = Kronos &lt;40% + 2 confirms + 0 warnings<br>
+            <b>NO TRADE</b> = Insufficient edge — wait
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Trading Score -->
+      <div class="dash-tile dash-wide" id="scoreCard" onclick="toggleDetail('detailScore')" style="display:none">
+        <div class="dt-label">Should I Trade?</div>
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="position:relative;width:52px;height:52px;flex-shrink:0">
+            <svg width="52" height="52" viewBox="0 0 52 52">
+              <circle cx="26" cy="26" r="21" fill="none" stroke="var(--border)" stroke-width="5"/>
+              <circle id="scoreCircle" cx="26" cy="26" r="21" fill="none" stroke="var(--red)" stroke-width="5"
+                stroke-dasharray="131.9" stroke-dashoffset="131.9" stroke-linecap="round"
+                transform="rotate(-90 26 26)" style="transition:stroke-dashoffset 1s ease,stroke 0.5s ease"/>
+            </svg>
+            <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center;line-height:1">
+              <div style="font-size:13px;font-weight:900" id="scoreNum">-</div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:13px;font-weight:800" id="scoreLabel">-</div>
+            <div style="font-size:10px;color:var(--muted2);margin-top:2px" id="scoreDesc">-</div>
+            <div style="background:var(--border);border-radius:99px;height:3px;margin-top:5px;overflow:hidden;width:100px">
+              <div id="scoreBar" style="height:100%;border-radius:99px;width:0%;transition:width 1s ease"></div>
+            </div>
+          </div>
+        </div>
+        <div class="dt-detail hidden" id="detailScore" onclick="event.stopPropagation()">
+          <div id="scoreBreakdown" style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:8px"></div>
+        </div>
+      </div>
+
+      <!-- 3. Kronos Upside -->
+      <div class="dash-tile" onclick="toggleDetail('detailKronos')">
+        <div class="dt-label">Kronos Signal</div>
+        <div class="dt-val" id="upsideVal">-</div>
+        <div class="dt-sub">Upside Probability</div>
+        <div class="dt-detail hidden" id="detailKronos" onclick="event.stopPropagation()">
+          <div class="bar-bg" style="margin-top:6px"><div class="bar-fill" id="upsideBar" style="width:0%"></div></div>
+          <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted2);margin-top:2px"><span>Bearish</span><span>Bullish</span></div>
+          <div id="accuracyBox" class="hidden" style="margin-top:6px;text-align:center">
+            <div style="font-size:10px;color:var(--muted2)">Historical Accuracy</div>
+            <div style="font-size:16px;font-weight:800" id="accuracyVal">-</div>
+            <div style="font-size:9px;color:var(--muted2)" id="accuracyCount">-</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. Model Confidence -->
+      <div class="dash-tile" onclick="toggleDetail('detailConf')">
+        <div class="dt-label">Confidence</div>
+        <div class="dt-val" id="confidenceVal">-</div>
+        <div class="dt-sub">Model confidence</div>
+        <div class="dt-detail hidden" id="detailConf" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            High = paths agree<br>Low = high uncertainty<br>0% = hallucinating
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. Regime ADX -->
+      <div class="dash-tile" onclick="toggleDetail('detailAdx')">
+        <div class="dt-label">Regime</div>
+        <div class="dt-val" id="adxVal">-</div>
+        <div class="dt-sub" id="regimeBadge">ADX</div>
+        <div class="dt-detail hidden" id="detailAdx" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🔴 &lt;20 = CHOPPY — do not trade<br>
+            🟡 20-25 = Weak trend<br>
+            🟢 25-35 = Trending<br>
+            🟢 &gt;35 = Strong trend
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. Price Target -->
+      <div class="dash-tile" onclick="toggleDetail('detailTarget')">
+        <div class="dt-label">24h Target</div>
+        <div class="dt-val" id="targetPrice" style="font-size:14px">-</div>
+        <div class="dt-sub" id="targetChange">-</div>
+        <div class="dt-detail hidden" id="detailTarget" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px">
+            P90: <span id="tHigh" style="color:var(--green)">-</span><br>
+            P10: <span id="tLow" style="color:var(--red)">-</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- 7. RSI -->
+      <div class="dash-tile" onclick="toggleDetail('detailRsi')">
+        <div class="dt-label">RSI 14</div>
+        <div class="dt-val" id="rsiVal">-</div>
+        <div class="dt-sub" id="rsiSignal" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailRsi" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🟢 &lt;30 = Oversold — bounce likely<br>
+            ⚪ 30-70 = Normal range<br>
+            🔴 &gt;70 = Overbought — drop likely
+          </div>
+        </div>
+      </div>
+
+      <!-- 8. MACD -->
+      <div class="dash-tile" onclick="toggleDetail('detailMacd')">
+        <div class="dt-label">MACD</div>
+        <div class="dt-val" id="macdVal">-</div>
+        <div class="dt-sub" id="macdSignal" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailMacd" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🟢 Bull = Upward momentum<br>
+            🔴 Bear = Downward momentum<br>
+            Disagreeing with Kronos = mixed
+          </div>
+        </div>
+      </div>
+
+      <!-- 9. BB% -->
+      <div class="dash-tile" onclick="toggleDetail('detailBb')">
+        <div class="dt-label">BB %</div>
+        <div class="dt-val" id="bbVal">-</div>
+        <div class="dt-sub" id="bbSignal" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailBb" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🟢 0-20% = Near bottom — oversold<br>
+            ⚪ 20-80% = Middle range<br>
+            🔴 80-100% = Near top — overbought
+          </div>
+        </div>
+      </div>
+
+      <!-- 10. Volume -->
+      <div class="dash-tile" onclick="toggleDetail('detailVol')">
+        <div class="dt-label">Volume</div>
+        <div class="dt-val" id="volRatioVal">-</div>
+        <div class="dt-sub" id="volSignal" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailVol" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🔴 &lt;0.3x = Very low — unreliable<br>
+            🟢 0.7-1.5x = Normal<br>
+            🟢 &gt;1.5x = High — confirms move
+          </div>
+        </div>
+      </div>
+
+      <!-- 11. Funding Rate -->
+      <div class="dash-tile" onclick="toggleDetail('detailFund')">
+        <div class="dt-label">Funding</div>
+        <div class="dt-val" id="fundingVal" style="font-size:13px">-</div>
+        <div class="dt-sub" id="fundingSignal" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailFund" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🟢 Negative = Shorts crowded — squeeze possible<br>
+            ⚪ Near zero = Neutral<br>
+            🔴 Positive = Longs crowded — correction likely
+          </div>
+        </div>
+      </div>
+
+      <!-- 12. BTC Dominance -->
+      <div class="dash-tile" onclick="toggleDetail('detailDom')">
+        <div class="dt-label">BTC Dom</div>
+        <div class="dt-val" id="domVal">-</div>
+        <div class="dt-sub" id="domSignal" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailDom" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🟢 &lt;50% = Good for ZEC/TAO<br>
+            ⚪ 50-55% = Neutral<br>
+            🔴 &gt;57% = Bad for alts — stay out
+          </div>
+        </div>
+      </div>
+
+      <!-- 13. Fear & Greed -->
+      <div class="dash-tile" onclick="toggleDetail('detailFg')">
+        <div class="dt-label">Fear&amp;Greed</div>
+        <div class="dt-val" id="fgVal" style="font-size:13px">-</div>
+        <div class="dt-sub" id="fgSignal" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailFg" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🟢 0-25 = Extreme Fear — buy zone<br>
+            ⚪ 45-55 = Neutral<br>
+            🔴 75-100 = Extreme Greed — sell zone
+          </div>
+        </div>
+      </div>
+
+      <!-- 14. Mempool -->
+      <div class="dash-tile" onclick="toggleDetail('detailMem')">
+        <div class="dt-label">Mempool</div>
+        <div class="dt-val" id="memVal" style="font-size:13px">-</div>
+        <div class="dt-sub" id="memSignal" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailMem" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🟢 &lt;5k = Low — quiet market<br>
+            ⚪ 5k-50k = Normal<br>
+            🔴 &gt;100k = Very High — often local top
+          </div>
+        </div>
+      </div>
+
+      <!-- 15. SMA20 -->
+      <div class="dash-tile" onclick="toggleDetail('detailSma')">
+        <div class="dt-label">SMA 20</div>
+        <div class="dt-val" id="sma20Val" style="font-size:13px">-</div>
+        <div class="dt-sub" id="smaSignal" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailSma" onclick="event.stopPropagation()">
+          <div style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">
+            🟢 Price above SMA = uptrend<br>
+            🔴 Price below SMA = downtrend<br>
+            Crossing SMA = trend change signal
+          </div>
+        </div>
+      </div>
+
+      <!-- 16. Signal Context -->
+      <div class="dash-tile" onclick="toggleDetail('detailCtx')">
+        <div class="dt-label">Signals</div>
+        <div class="dt-val" id="ctxScore" style="font-size:18px">-</div>
+        <div class="dt-sub" id="contextSummary" style="font-size:9px">-</div>
+        <div class="dt-detail hidden" id="detailCtx" onclick="event.stopPropagation()">
+          <div id="confirmations" style="margin-top:6px"></div>
+          <div id="warnings"></div>
+        </div>
+      </div>
+
+    </div><!-- end dash-grid -->
+
+    <!-- Chart & Forecast — collapsible -->
+    <div style="margin-top:8px">
+      <button onclick="toggleDetail('detailChart')" class="btn-predict" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);padding:10px;font-size:12px">
+        📊 Show Forecast Chart &amp; Hourly Breakdown
+      </button>
+      <div class="hidden" id="detailChart">
+        <div class="card" style="margin-top:8px">
+          <div class="card-title">Forecast Chart (24h)</div>
+          <div class="chart-wrap"><canvas id="chart"></canvas></div>
+        </div>
+        <div class="card" style="margin-top:8px">
+          <div class="card-title">Hourly Breakdown</div>
+          <table class="table">
+            <thead><tr><th>Hour</th><th>Mean Price</th><th style="text-align:right">P90 / P10</th></tr></thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+      </div>
     </div>
 
-    <!-- Trading Score -->
-    <div class="card" id="scoreCard" style="display:none">
-      <div class="card-title">Should I Trade?</div>
-      <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
-        <!-- Score circle -->
-        <div style="position:relative;width:72px;height:72px;flex-shrink:0">
-          <svg width="72" height="72" viewBox="0 0 72 72">
-            <circle cx="36" cy="36" r="30" fill="none" stroke="var(--border)" stroke-width="6"/>
-            <circle id="scoreCircle" cx="36" cy="36" r="30" fill="none" stroke="var(--red)" stroke-width="6"
-              stroke-dasharray="188.5" stroke-dashoffset="188.5"
-              stroke-linecap="round" transform="rotate(-90 36 36)"
-              style="transition:stroke-dashoffset 1s ease,stroke 0.5s ease"/>
-          </svg>
-          <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);text-align:center">
-            <div style="font-size:18px;font-weight:900;line-height:1" id="scoreNum">-</div>
-            <div style="font-size:8px;color:var(--muted2)">SCORE</div>
-          </div>
-        </div>
-        <!-- Label and bar -->
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:800;margin-bottom:3px" id="scoreLabel">-</div>
-          <div style="font-size:11px;color:var(--muted2);margin-bottom:6px" id="scoreDesc">-</div>
-          <div style="background:var(--border);border-radius:99px;height:4px;overflow:hidden">
-            <div id="scoreBar" style="height:100%;border-radius:99px;width:0%;transition:width 1s ease"></div>
-          </div>
-        </div>
-      </div>
-      <!-- Compact signal grid -->
-      <div id="scoreBreakdown" style="display:grid;grid-template-columns:1fr 1fr;gap:5px"></div>
-    </div>
-
-    <!-- Position Sizing (advisory) -->
-    <div id="positionCard" class="card hidden">
-      <div class="card-title">Position Sizing (Advisory - Adjust to Your Capital)</div>
-      <div class="ind-grid">
-        <div class="ind-item"><div class="ind-val" id="psSize">-</div><div class="ind-label">Kelly Size</div></div>
-        <div class="ind-item"><div class="ind-val" id="psRisk">-</div><div class="ind-label">Capital at Risk</div></div>
-        <div class="ind-item"><div class="ind-val" id="psMax">-</div><div class="ind-label">Max Position</div></div>
-        <div class="ind-item"><div class="ind-val" id="psStop">-</div><div class="ind-label">Stop Loss (P10)</div></div>
-        <div class="ind-item"><div class="ind-val" id="psTarget">-</div><div class="ind-label">Take Profit (1.5x)</div></div>
-      </div>
-      <div style="display:flex;gap:8px;margin-top:10px">
-        <button id="copyStopBtn" onclick="copyStop()" style="flex:1;padding:8px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;cursor:pointer">Copy Stop Price</button>
-        <button id="copyTargetBtn" onclick="copyTarget()" style="flex:1;padding:8px;background:var(--card2);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:12px;cursor:pointer">Copy Target Price</button>
-      </div>
-      <div id="alertToggle" style="margin-top:8px;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted2)">
-        <input type="checkbox" id="priceAlertOn" onchange="toggleAlert()">
-        <label for="priceAlertOn">Alert me when price hits stop loss</label>
-      </div>
-      <div style="font-size:10px;color:var(--muted);margin-top:8px;text-align:center">Quarter-Kelly formula. This is NOT financial advice.</div>
-    </div>
-
-    <!-- Kronos Primary Signal -->
-    <div class="card">
-      <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
-        <span>Kronos Model Signal (Primary)</span>
-        <span id="regimeBadge" class="regime-badge-weak">-</span>
-      </div>
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-value" id="upsideVal">-</div>
-          <div class="metric-label">Upside Probability<br>(Kronos-base)</div>
-        </div>
-        <div class="metric">
-          <div class="metric-value" id="confidenceVal">-</div>
-          <div class="metric-label">Model<br>Confidence</div>
-        </div>
-      </div>
-      <div class="bar-wrap">
-        <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--muted2)"><span>Bearish</span><span>Bullish</span></div>
-        <div class="bar-bg"><div class="bar-fill" id="upsideBar" style="width:0%"></div></div>
-      </div>
-      <div id="accuracyBox" class="accuracy-box hidden">
-        <div style="font-size:12px;color:var(--muted2)">Historical Accuracy (this coin)</div>
-        <div style="font-size:18px;font-weight:800;margin-top:4px" id="accuracyVal">-</div>
-        <div style="font-size:10px;color:var(--muted);margin-top:2px" id="accuracyCount">-</div>
-      </div>
-    </div>
-
-    <!-- Signal Context -->
-    <div class="card">
-      <div class="card-title">Signal Context (Auxiliary Filters)</div>
-      <div id="contextSummary" style="font-size:13px;font-weight:600;margin-bottom:10px"></div>
-      <div id="confirmations"></div>
-      <div id="warnings"></div>
-    </div>
-
-    <!-- Price Target -->
-    <div class="card">
-      <div class="card-title">24h Price Target (P10-P90 . N=100 . Greedy Mean)</div>
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div style="font-size:28px;font-weight:800" id="targetPrice">-</div>
-          <div style="font-size:13px;color:var(--muted2);margin-top:4px" id="targetChange">-</div>
-        </div>
-        <div style="text-align:right">
-          <div style="font-size:11px;color:var(--muted);margin-bottom:2px">P90 / P10</div>
-          <div style="font-size:13px;font-weight:600;color:var(--green)" id="tHigh">-</div>
-          <div style="font-size:13px;font-weight:600;color:var(--red)" id="tLow">-</div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Technical Indicators -->
-    <div class="card">
-      <div class="card-title">Technical Indicators <span style="font-size:10px;color:var(--muted2);font-weight:400">— tap any tile for explanation</span></div>
-      <div class="tile-grid">
-        <div class="tile" onclick="toggleTile('rsiTile')">
-          <div class="tile-name">RSI 14</div>
-          <div class="tile-val" id="rsiVal">-</div>
-          <div class="tile-sig" id="rsiSignal">-</div>
-          <div class="tile-explain hidden" id="rsiTile">
-            <b>Relative Strength Index — Is the coin overbought or oversold?</b><br><br>
-            🟢 &lt;30 = OVERSOLD — coin fell too fast, bounce likely UP<br>
-            🟡 30–50 = SLIGHTLY BEARISH — mild downward pressure<br>
-            ⚪ 50–70 = NEUTRAL/BULLISH — normal healthy range<br>
-            🔴 &gt;70 = OVERBOUGHT — coin rose too fast, drop likely<br>
-            🚨 &gt;80 = EXTREMELY OVERBOUGHT — high reversal risk
-          </div>
-        </div>
-        <div class="tile" onclick="toggleTile('macdTile')">
-          <div class="tile-name">MACD</div>
-          <div class="tile-val" id="macdVal">-</div>
-          <div class="tile-sig" id="macdSignal">-</div>
-          <div class="tile-explain hidden" id="macdTile">
-            <b>Is momentum going UP or DOWN?</b><br><br>
-            🟢 BULL = Upward momentum accelerating — confirms buy signals<br>
-            🔴 BEAR = Downward momentum accelerating — confirms sell signals<br>
-            ⚠️ When MACD disagrees with Kronos = mixed signal, be cautious
-          </div>
-        </div>
-        <div class="tile" onclick="toggleTile('bbTile')">
-          <div class="tile-name">BB %</div>
-          <div class="tile-val" id="bbVal">-</div>
-          <div class="tile-sig" id="bbSignal">-</div>
-          <div class="tile-explain hidden" id="bbTile">
-            <b>Bollinger Band — Where is price in its normal range?</b><br><br>
-            🟢 0–20% = NEAR BOTTOM — oversold, bounce possible<br>
-            ⚪ 20–80% = MIDDLE RANGE — normal, no extreme<br>
-            🔴 80–100% = NEAR TOP — overbought, drop possible
-          </div>
-        </div>
-        <div class="tile" onclick="toggleTile('adxTile')">
-          <div class="tile-name">ADX</div>
-          <div class="tile-val" id="adxVal">-</div>
-          <div class="tile-sig" id="adxSignal">-</div>
-          <div class="tile-explain hidden" id="adxTile">
-            <b>Trend Strength — HOW STRONG is the trend (NOT direction!)</b><br><br>
-            🔴 &lt;20 = CHOPPY — DO NOT TRADE, all signals unreliable<br>
-            🟡 20–25 = WEAK TREND — wait for confirmation<br>
-            🟢 25–35 = TRENDING — good conditions, signals reliable<br>
-            🟢 35–50 = STRONG TREND — excellent trading conditions<br>
-            ⚡ &gt;50 = VERY STRONG TREND — powerful move in progress
-          </div>
-        </div>
-        <div class="tile" onclick="toggleTile('volTile')">
-          <div class="tile-name">Vol Ratio</div>
-          <div class="tile-val" id="volRatioVal">-</div>
-          <div class="tile-sig" id="volSignal">-</div>
-          <div class="tile-explain hidden" id="volTile">
-            <b>Volume vs 20-day average — Is trading activity unusual?</b><br><br>
-            🔴 &lt;0.3x = VERY LOW — price moves unreliable<br>
-            🟡 0.3–0.7x = LOW — treat signals with caution<br>
-            🟢 0.7–1.5x = NORMAL — healthy activity<br>
-            🟢 1.5–3x = HIGH — confirms price moves<br>
-            ⚡ &gt;3x = EXTREMELY HIGH — major event, be careful
-          </div>
-        </div>
-        <div class="tile" onclick="toggleTile('smaTile')">
-          <div class="tile-name">SMA 20</div>
-          <div class="tile-val" id="sma20Val">-</div>
-          <div class="tile-sig" id="smaSignal">-</div>
-          <div class="tile-explain hidden" id="smaTile">
-            <b>20-hour average price — Key support/resistance level</b><br><br>
-            🟢 Price ABOVE SMA20 = Bullish uptrend in place<br>
-            🔴 Price BELOW SMA20 = Bearish downtrend in place<br>
-            ⚠️ Price crossing SMA20 = potential trend change
-          </div>
-        </div>
-        <div class="tile" onclick="toggleTile('fgTile')">
-          <div class="tile-name">Fear &amp; Greed</div>
-          <div class="tile-val" id="fgVal">-</div>
-          <div class="tile-sig" id="fgSignal">-</div>
-          <div class="tile-explain hidden" id="fgTile">
-            <b>Market Sentiment 0–100 — Contrarian indicator (BTC only)</b><br><br>
-            🟢 0–25 = EXTREME FEAR — historically great BUY zone<br>
-            🟡 25–45 = FEAR — market nervous, potential opportunity<br>
-            ⚪ 45–55 = NEUTRAL — no strong sentiment<br>
-            🟡 55–75 = GREED — market optimistic, be cautious<br>
-            🔴 75–100 = EXTREME GREED — historically great SELL zone
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Crypto-Native Signals -->
-    <div class="card">
-      <div class="card-title">Crypto-Native Signals <span style="font-size:10px;color:var(--muted2);font-weight:400">— tap any tile for explanation</span></div>
-      <div class="tile-grid">
-        <div class="tile" onclick="toggleTile('fundTile')">
-          <div class="tile-name">Funding Rate</div>
-          <div class="tile-val" id="fundingVal">-</div>
-          <div class="tile-sig" id="fundingSignal">-</div>
-          <div class="tile-explain hidden" id="fundTile">
-            <b>Futures market positioning — Too many longs or shorts?</b><br><br>
-            🟢 &lt;-0.05% = TOO MANY SHORTS — squeeze likely UP<br>
-            🟢 -0.05 to -0.01% = SHORTS CROWDED — bullish lean<br>
-            ⚪ Near zero = NEUTRAL — balanced market<br>
-            🟡 0.01–0.05% = LONGS CROWDED — mild caution<br>
-            🔴 &gt;0.05% = TOO MANY LONGS — correction likely DOWN
-          </div>
-        </div>
-        <div class="tile" id="etfRow" onclick="toggleTile('etfTile')">
-          <div class="tile-name">ETF Flows</div>
-          <div class="tile-val" id="etfVal">-</div>
-          <div class="tile-sig" id="etfSignal">-</div>
-          <div class="tile-explain hidden" id="etfTile">
-            <b>Bitcoin ETF daily flows — Are institutions buying or selling?</b><br><br>
-            🟢 &gt;$300M = STRONG INFLOWS — institutions buying heavily<br>
-            🟢 $0–$300M = INFLOWS — institutions buying, mild bullish<br>
-            🔴 -$300M–$0 = OUTFLOWS — institutions selling, mild bearish<br>
-            🔴 &lt;-$300M = STRONG OUTFLOWS — very bearish
-          </div>
-        </div>
-        <div class="tile" onclick="toggleTile('memTile')">
-          <div class="tile-name">Mempool</div>
-          <div class="tile-val" id="memVal">-</div>
-          <div class="tile-sig" id="memSignal">-</div>
-          <div class="tile-explain hidden" id="memTile">
-            <b>Bitcoin network congestion — High activity = high demand</b><br><br>
-            🟢 &lt;5,000 = LOW — network quiet, cheap fees<br>
-            ⚪ 5K–50K = NORMAL — typical daily activity<br>
-            🟡 50K–100K = HIGH — moderate congestion<br>
-            🔴 &gt;100K = VERY HIGH — peak demand, often signals local top
-          </div>
-        </div>
-        <div class="tile" onclick="toggleTile('domTile')">
-          <div class="tile-name">BTC Dominance</div>
-          <div class="tile-val" id="domVal">-</div>
-          <div class="tile-sig" id="domSignal">-</div>
-          <div class="tile-explain hidden" id="domTile">
-            <b>Bitcoin % of total crypto market — Key for ZEC/TAO trading</b><br><br>
-            🟢 &lt;45% = ALT SEASON — great time for ZEC/TAO<br>
-            🟢 45–50% = FAVORABLE — alts performing well<br>
-            ⚪ 50–55% = NEUTRAL — mixed for alts<br>
-            🟡 55–60% = BTC DOMINANT — alts under pressure<br>
-            🔴 &gt;60% = BITCOIN SEASON — avoid ZEC/TAO trading
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Chart -->
-    <div class="card">
-      <div class="card-title">Forecast Chart (24h)</div>
-      <div class="chart-wrap"><canvas id="chart"></canvas></div>
-    </div>
-
-    <!-- Table -->
-    <div class="card">
-      <div class="card-title">Hourly Breakdown</div>
-      <table class="table">
-        <thead><tr><th>Hour</th><th>Mean Price</th><th style="text-align:right">P90 / P10</th></tr></thead>
-        <tbody id="tableBody"></tbody>
-      </table>
-    </div>
-
-    <div class="badge-row" style="padding:4px 0;display:flex;gap:8px;flex-wrap:wrap;justify-content:center">
+    <!-- Model info & refresh -->
+    <div class="badge-row" style="padding:6px 0;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px">
       <span class="badge badge-blue" id="deviceBadge">Kronos-base . N=100</span>
       <span class="badge badge-purple" id="gpuBadge" style="display:none">GPU Active</span>
     </div>
     <button class="btn-predict" onclick="startPrediction()" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);margin-top:4px">Request Fresh Prediction</button>
   </div>
-</div>
 
 <script>
 var BASE = window.location.origin;
@@ -776,8 +773,8 @@ function showResults(d) {
     if (d.next_refresh_mins > 0) ageText += ' . refresh in ' + d.next_refresh_mins + 'min';
   }
   var staleHtml = d.is_stale ? ' <span class="stale-warn">STALE</span>' : '';
-  document.getElementById('updatedTime').innerHTML =
-    'Last updated: ' + new Date(d.updated_at).toLocaleString() + ageText + staleHtml;
+  var utEl = document.getElementById('updatedTimeText');
+  if (utEl) utEl.innerHTML = 'Updated: ' + new Date(d.updated_at).toLocaleString() + ageText + staleHtml;
 
   // Advisory Trade Signal with circuit breaker
   var sc = d.signal_context || {};
@@ -874,28 +871,35 @@ function showResults(d) {
       d.accuracy.correct + ' correct out of ' + d.accuracy.total + ' tracked';
   }
 
+  // Signal context tile
+  var ctxEl = document.getElementById('ctxScore');
+  var nC = sc.n_confirm || 0;
+  var nW = sc.n_warn || 0;
+  if (ctxEl) {
+    ctxEl.textContent = nC + '✓ ' + nW + '⚠';
+    ctxEl.style.color = nC > nW ? 'var(--green)' : nW > nC ? 'var(--orange)' : 'var(--muted2)';
+  }
+
   // Hallucination warning
   var sumEl = document.getElementById('contextSummary');
   if (d.hallucinating) {
-    sumEl.innerHTML = '<span style="color:var(--red);font-weight:700">Model Hallucinating Certainty</span><br>' +
-      '<span style="font-size:11px;color:var(--muted2)">Predicted range tighter than historical volatility. Do not trust extreme readings.</span>';
+    if (sumEl) { sumEl.textContent = '⚠ Hallucinating — do not trust'; sumEl.style.color = 'var(--red)'; }
   } else {
-    sumEl.textContent = sc.context || '-';
-    sumEl.style.color = (sc.n_confirm||0) > (sc.n_warn||0) ? 'var(--green)' :
-                        (sc.n_warn||0) > (sc.n_confirm||0) ? 'var(--orange)' : 'var(--muted2)';
+    if (sumEl) { sumEl.textContent = sc.context || '-'; sumEl.style.color = nC > nW ? 'var(--green)' : nW > nC ? 'var(--orange)' : 'var(--muted2)'; }
   }
   var cDiv = document.getElementById('confirmations');
-  cDiv.innerHTML = '';
-  (sc.confirmations || []).forEach(function(c) {
-    cDiv.innerHTML += '<div class="context-item"><span style="color:var(--green)">OK</span><span>' + c + '</span></div>';
-  });
+  if (cDiv) {
+    cDiv.innerHTML = '';
+    (sc.confirmations || []).forEach(function(c) {
+      cDiv.innerHTML += '<div style="font-size:10px;color:var(--green);padding:2px 0">✓ ' + c + '</div>';
+    });
+  }
   var wDiv = document.getElementById('warnings');
-  wDiv.innerHTML = '';
-  (sc.warnings || []).forEach(function(w) {
-    wDiv.innerHTML += '<div class="context-item"><span style="color:var(--orange)">!</span><span>' + w + '</span></div>';
-  });
-  if (!(sc.confirmations||[]).length && !(sc.warnings||[]).length) {
-    cDiv.innerHTML = '<div class="context-item"><span style="color:var(--muted2)">-</span><span style="color:var(--muted2)">No strong auxiliary signals</span></div>';
+  if (wDiv) {
+    wDiv.innerHTML = '';
+    (sc.warnings || []).forEach(function(w) {
+      wDiv.innerHTML += '<div style="font-size:10px;color:var(--orange);padding:2px 0">! ' + w + '</div>';
+    });
   }
 
   // Price target
@@ -1498,7 +1502,7 @@ function showTradeScore(d) {
   document.getElementById('scoreNum').style.color = color;
   var circle = document.getElementById('scoreCircle');
   if (circle) {
-    var circumference = 188.5;
+    var circumference = 131.9;
     var offset = circumference - (total / 100 * circumference);
     circle.style.strokeDashoffset = offset;
     circle.style.stroke = color;

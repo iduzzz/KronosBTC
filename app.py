@@ -38,7 +38,7 @@ MODEL_NAME     = "NeoQuasar/Kronos-base"
 TOKENIZER_NAME = "NeoQuasar/Kronos-Tokenizer-base"
 LOOKBACK       = 384
 PRED_LEN       = 24
-MONTE_CARLO_N  = 100
+MONTE_CARLO_N  = max(1, min(int(os.environ.get("KRONOS_MONTE_CARLO_N", "100")), 1000))
 REFRESH_SECS   = 3600
 NUM_WORKERS    = 1
 DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
@@ -47,6 +47,13 @@ DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
 # credentials or order-submission code.  Paper mode must be explicitly enabled.
 APP_MODE = os.environ.get("KRONOS_APP_MODE", "research").lower()
 PAPER_TRADING_ENABLED = APP_MODE == "paper"
+# Keep the execution accounting internally consistent.  Spot is the default
+# because the app's candles come from Binance spot.  Set KRONOS_EXECUTION_VENUE
+# to "futures" only when you deliberately want both candles and funding to use
+# Binance USD-M futures.
+EXECUTION_VENUE = os.environ.get("KRONOS_EXECUTION_VENUE", "spot").strip().lower()
+if EXECUTION_VENUE not in {"spot", "futures"}:
+    EXECUTION_VENUE = "spot"
 TAKER_FEE_PCT = float(os.environ.get("KRONOS_TAKER_FEE_PCT", "0.10"))
 SLIPPAGE_PCT = float(os.environ.get("KRONOS_SLIPPAGE_PCT", "0.05"))
 ROUND_TRIP_COST_PCT = 2 * (TAKER_FEE_PCT + SLIPPAGE_PCT)
@@ -61,6 +68,7 @@ COINS = {
 predictor    = None
 cache        = {}
 cache_lock   = threading.Lock()
+state_lock   = threading.Lock()
 model_ready  = False
 model_error  = ""
 running      = {}
@@ -70,6 +78,47 @@ task_queue   = queue.Queue()
 db_lock      = threading.Lock()
 queued_coins = set()
 queue_lock   = threading.Lock()
+stats_cache  = {"data": None, "updated_monotonic": 0.0}
+stats_lock   = threading.Lock()
+lookback_cache = {}
+lookback_lock  = threading.Lock()
+
+
+def _request_with_retry(url, *, params=None, headers=None, timeout=(3, 12), retries=2):
+    """Small, bounded retry helper for read-only external data requests."""
+    last_error = None
+    for attempt in range(retries + 1):
+        try:
+            response = requests.get(url, params=params, headers=headers, timeout=timeout)
+            if response.ok:
+                return response
+            last_error = RuntimeError(f"HTTP {response.status_code}")
+        except requests.RequestException as exc:
+            last_error = exc
+        if attempt < retries:
+            time.sleep(0.75 * (attempt + 1))
+    raise RuntimeError(f"Request failed for {url}: {last_error}")
+
+
+def _invalidate_stats_cache():
+    with stats_lock:
+        stats_cache["data"] = None
+        stats_cache["updated_monotonic"] = 0.0
+
+
+def _json_safe(value):
+    """Convert known NumPy/Pandas values without lossy JSON double-encoding."""
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return [_json_safe(v) for v in value.tolist()]
+    if isinstance(value, (pd.Timestamp, datetime)):
+        return value.isoformat()
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return value
 
 
 # ── SQLite ─────────────────────────────────────────────────────────────────────
@@ -174,6 +223,19 @@ def init_db():
         "ALTER TABLE accuracy ADD COLUMN momentum_correct INTEGER",
         "ALTER TABLE accuracy ADD COLUMN carry_correct INTEGER",
         "ALTER TABLE accuracy ADD COLUMN flat_correct INTEGER",
+        "ALTER TABLE accuracy ADD COLUMN target_at TEXT",
+        "ALTER TABLE accuracy ADD COLUMN raw_upside_prob REAL",
+        "ALTER TABLE accuracy ADD COLUMN candidate_signal TEXT",
+        "ALTER TABLE accuracy ADD COLUMN actual_move_pct REAL",
+        "ALTER TABLE accuracy ADD COLUMN gross_return_pct REAL",
+        "ALTER TABLE accuracy ADD COLUMN net_return_pct REAL",
+        "ALTER TABLE accuracy ADD COLUMN estimated_cost_pct REAL",
+        "ALTER TABLE accuracy ADD COLUMN estimated_funding_cost_pct REAL",
+        "ALTER TABLE paper_trades ADD COLUMN target_at TEXT",
+        "ALTER TABLE paper_trades ADD COLUMN gross_pnl_pct REAL",
+        "ALTER TABLE paper_trades ADD COLUMN net_pnl_pct REAL",
+        "ALTER TABLE paper_trades ADD COLUMN estimated_cost_pct REAL",
+        "ALTER TABLE paper_trades ADD COLUMN estimated_funding_cost_pct REAL",
     ]
     for sql in migrations:
         try:
@@ -186,7 +248,7 @@ def init_db():
     print(f"[DB] SQLite ready (WAL mode): {DB_FILE}", flush=True)
 
 
-def save_prediction(symbol, result):
+def _deprecated_save_prediction(symbol, result):
     try:
         with db_lock:
             with sqlite3.connect(DB_FILE) as conn:
@@ -229,7 +291,7 @@ def save_prediction(symbol, result):
         print(f"[DB] Save failed: {e}", flush=True)
 
 
-def log_paper_trade(symbol, result):
+def _deprecated_log_paper_trade(symbol, result):
     """Log paper trade when signal is LONG or SHORT. Auto-closes after 24h."""
     try:
         ps  = result.get("position_size")
@@ -251,7 +313,7 @@ def log_paper_trade(symbol, result):
         print(f"[Paper] Log failed: {e}", flush=True)
 
 
-def close_paper_trades():
+def _deprecated_close_paper_trades():
     """Check ALL open trades every hour for stop/target hits.
     TIME_EXIT only after 24h. Stops/targets evaluated immediately."""
     try:
@@ -354,7 +416,7 @@ def load_cache_from_disk():
         print(f"[DB] Load failed: {e}", flush=True)
 
 
-def check_accuracy():
+def _deprecated_check_accuracy():
     """Compare 24h-old predictions against actual prices."""
     try:
         with db_lock:
@@ -439,7 +501,7 @@ def check_accuracy():
         print(f"[Accuracy] Check failed: {e}", flush=True)
 
 
-def get_accuracy_stats():
+def _deprecated_get_accuracy_stats():
     try:
         with sqlite3.connect(DB_FILE) as conn:
             # Per-symbol Kronos accuracy
@@ -534,8 +596,9 @@ def worker():
             break
         with queue_lock:
             queued_coins.discard(symbol)
-        running[symbol] = True
-        running_since[symbol] = time.time()
+        with state_lock:
+            running[symbol] = True
+            running_since[symbol] = time.time()
         try:
             run_prediction(symbol)
         except Exception as e:
@@ -553,7 +616,9 @@ def worker():
             except Exception as db_e:
                 print(f"[DB] Failed to log prediction failure: {db_e}", flush=True)
         finally:
-            running[symbol] = False
+            with state_lock:
+                running[symbol] = False
+                running_since.pop(symbol, None)
         print(f"[Kronos] {symbol} complete. Waiting for next manual request.", flush=True)
 
 
@@ -648,8 +713,7 @@ def compute_indicators(df):
 # ── External signals ───────────────────────────────────────────────────────────
 def fetch_fear_greed():
     try:
-        r = requests.get("https://api.alternative.me/fng/?limit=1", timeout=10)
-        r.raise_for_status()
+        r = _request_with_retry("https://api.alternative.me/fng/?limit=1")
         d = r.json()
         return {"value": int(d["data"][0]["value"]),
                 "label": d["data"][0]["value_classification"]}
@@ -658,9 +722,9 @@ def fetch_fear_greed():
 
 def fetch_funding_rate(symbol):
     try:
-        r = requests.get("https://fapi.binance.com/fapi/v1/fundingRate",
-                         params={"symbol": COINS[symbol], "limit": 3}, timeout=10)
-        if r.ok and r.json():
+        r = _request_with_retry("https://fapi.binance.com/fapi/v1/fundingRate",
+                                params={"symbol": COINS[symbol], "limit": 3})
+        if r.json():
             data = r.json()
             rate = float(data[-1]["fundingRate"]) * 100
             avg  = sum(float(d["fundingRate"]) for d in data) / len(data) * 100
@@ -673,10 +737,8 @@ def fetch_funding_rate(symbol):
 
 def fetch_etf_flows():
     try:
-        r = requests.get("https://farside.co.uk/bitcoin-etf-flow-all-data-table/",
-                         headers={"User-Agent": "Mozilla/5.0"}, timeout=15)
-        if not r.ok:
-            return {"total": None, "label": "Unavailable"}
+        r = _request_with_retry("https://farside.co.uk/bitcoin-etf-flow-all-data-table/",
+                                headers={"User-Agent": "Mozilla/5.0"}, timeout=(3, 15))
         rows = re.findall(r'<tr[^>]*>(.*?)</tr>', r.text, re.DOTALL)
         if rows:
             numbers = re.findall(r'-?\d+(?:\.\d+)?',
@@ -696,23 +758,21 @@ def fetch_etf_flows():
 def fetch_onchain():
     result = {"mempool_size": 0, "mempool_label": "Normal"}
     try:
-        r = requests.get("https://mempool.space/api/mempool", timeout=10)
-        if r.ok:
-            m = r.json()
-            result["mempool_size"] = m.get("count", 0)
-            s = result["mempool_size"]
-            result["mempool_label"] = "Very High" if s > 100000 else \
-                                      "High" if s > 50000 else \
-                                      "Low" if s < 5000 else "Normal"
+        r = _request_with_retry("https://mempool.space/api/mempool")
+        m = r.json()
+        result["mempool_size"] = m.get("count", 0)
+        s = result["mempool_size"]
+        result["mempool_label"] = "Very High" if s > 100000 else \
+                                  "High" if s > 50000 else \
+                                  "Low" if s < 5000 else "Normal"
     except Exception as e:
         print(f"[OnChain] Failed: {e}", flush=True)
     return result
 
 def fetch_btc_dominance():
     try:
-        r = requests.get("https://api.coingecko.com/api/v3/global", timeout=10)
-        if r.ok:
-            return round(r.json()["data"]["market_cap_percentage"]["btc"], 2)
+        r = _request_with_retry("https://api.coingecko.com/api/v3/global")
+        return round(r.json()["data"]["market_cap_percentage"]["btc"], 2)
     except Exception:
         pass
     return None
@@ -722,13 +782,16 @@ def fetch_btc_dominance():
 def fetch_candles(symbol, interval="1h", limit=384):
     binance_symbol = COINS[symbol]
     params = {"symbol": binance_symbol, "interval": interval, "limit": limit}
-    for url in ["https://api1.binance.com/api/v3/klines",
+    if EXECUTION_VENUE == "futures":
+        urls = ["https://fapi.binance.com/fapi/v1/klines"]
+    else:
+        urls = ["https://api1.binance.com/api/v3/klines",
                 "https://api2.binance.com/api/v3/klines",
                 "https://api3.binance.com/api/v3/klines",
-                "https://api.binance.com/api/v3/klines"]:
+                "https://api.binance.com/api/v3/klines"]
+    for url in urls:
         try:
-            r = requests.get(url, params=params, timeout=15)
-            r.raise_for_status()
+            r = _request_with_retry(url, params=params, timeout=(3, 15), retries=1)
             raw = r.json()
             df  = pd.DataFrame(raw, columns=[
                 "open_time","open","high","low","close","volume",
@@ -755,6 +818,10 @@ def fetch_candles(symbol, interval="1h", limit=384):
 
 # ── Find safe lookback ─────────────────────────────────────────────────────────
 def find_safe_lookback(df, symbol):
+    with lookback_lock:
+        cached = lookback_cache.get((symbol, DEVICE_TYPE))
+    if cached is not None and cached <= len(df):
+        return cached
     candidates = [384, 370, 360, 350, 340, 330, 320, 300, 280, 256]
     for lookback in candidates:
         if lookback > len(df):
@@ -773,8 +840,10 @@ def find_safe_lookback(df, symbol):
                 predictor.predict(
                     df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
                     pred_len=2, T=0.7, top_p=0.9, sample_count=1
-                )
+            )
             print(f"[Kronos] {symbol} safe lookback={lookback} (dry-run passed)", flush=True)
+            with lookback_lock:
+                lookback_cache[(symbol, DEVICE_TYPE)] = lookback
             return lookback
         except RuntimeError as e:
             if "size of tensor" in str(e) or "must match" in str(e):
@@ -833,18 +902,20 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
 
             avg_secs  = sum(run_times) / len(run_times)
             remaining = (MONTE_CARLO_N - i - 1) * avg_secs
-            progress[symbol] = {
-                "current": i + 1, "total": MONTE_CARLO_N,
-                "secs_per_run": round(avg_secs, 2),
-                "remaining_secs": round(remaining, 0),
-                "pct": round((i + 1) / MONTE_CARLO_N * 100, 1),
-            }
+            with state_lock:
+                progress[symbol] = {
+                    "current": i + 1, "total": MONTE_CARLO_N,
+                    "secs_per_run": round(avg_secs, 2),
+                    "remaining_secs": round(remaining, 0),
+                    "pct": round((i + 1) / MONTE_CARLO_N * 100, 1),
+                }
             if i % 10 == 0:
                 print(f"[Kronos] {symbol} MC {i+1}/{MONTE_CARLO_N} "
                       f"({avg_secs:.1f}s/run, ~{remaining/60:.1f}min left)", flush=True)
 
     closes = np.array(all_closes)
-    progress.pop(symbol, None)
+    with state_lock:
+        progress.pop(symbol, None)
 
     # The displayed central forecast must match the uncertainty bands: both
     # are derived from the same Monte Carlo population.  A separate greedy
@@ -909,7 +980,7 @@ def circuit_breaker_check(symbol):
 
 
 # ── Position Sizing (advisory only — never a command) ─────────────────────────
-def compute_position_size(upside_prob, confidence, regime, last_price, p10, p90, capital=10000):
+def _deprecated_compute_position_size(upside_prob, confidence, regime, last_price, p10, p90, capital=10000):
     """
     Position sizing DISABLED — model edge not yet validated.
     Returns advisory warning only.
@@ -932,7 +1003,7 @@ def compute_position_size(upside_prob, confidence, regime, last_price, p10, p90,
 
 
 # ── Signal interpretation ──────────────────────────────────────────────────────
-def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
+def _deprecated_interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows,
                       onchain, btc_dominance, symbol):
     rsi    = ind["rsi"]
     macd_h = ind["macd_hist"]
@@ -1079,30 +1150,9 @@ def run_prediction(symbol):
     raw_upside_prob = float((final_prices > last_price).mean()) * 100
     upside_prob     = raw_upside_prob  # sampled paths are not calibrated probabilities
 
-    std_pct      = std / last_price * 100
-    hist_vol_pct = float(df["close"].pct_change().dropna().std() * 100)
-    hist_vol_24h = hist_vol_pct * float(np.sqrt(PRED_LEN))
-    spread_pct   = (upper - lower) / last_price * 100
-    avg_spread   = float(spread_pct.mean())
-
-    # Ratio of model spread to 24h historical volatility
-    # ratio < 1.0: model too tight (hallucinating)
-    # ratio = 1.0: perfectly calibrated (peak confidence = 75%)
-    # ratio > 1.0: model spread wider than history (increasing uncertainty)
-    spread_ratio = avg_spread / max(hist_vol_24h, 0.001)
-    hallucinating = spread_ratio < 1.0
-
-    if hallucinating:
-        # Confidence scales linearly from 10% (ratio=0) to 75% (ratio=1)
-        # Fully continuous at boundary
-        confidence = round(max(10.0, 75.0 * spread_ratio), 1)
-    else:
-        # Confidence peaks at 75% (ratio=1) and decreases as spread widens
-        # Fully continuous at boundary: both formulas give 75% at ratio=1
-        confidence = round(max(10.0, 100.0 - 25.0 * spread_ratio), 1)
-
-    print(f"[Kronos] {symbol} spread={avg_spread:.2f}% hist_vol_24h={hist_vol_24h:.2f}% "
-          f"ratio={spread_ratio:.2f} hallucinating={hallucinating} conf={confidence}", flush=True)
+    # The forecast band is descriptive only.  It is not a confidence score or
+    # calibrated probability until the stored outcomes demonstrate calibration.
+    forecast_band_width_pct = float((upper[-1] - lower[-1]) / last_price * 100)
 
     signal_context = interpret_signals(
         upside_prob, sig["indicators"], sig["fear_greed"],
@@ -1123,10 +1173,9 @@ def run_prediction(symbol):
         "device":             DEVICE_TYPE,
         "upside_prob":        round(upside_prob, 1),
         "raw_upside_prob":    round(raw_upside_prob, 1),
-        "hallucinating":      hallucinating,
-        "confidence":         None,
         "probability_status": "uncalibrated_research_only",
-        "forecast_dispersion_ratio": round(spread_ratio, 3),
+        "forecast_band_width_pct": round(forecast_band_width_pct, 3),
+        "execution_venue":    EXECUTION_VENUE,
         "lookback_used":      pred.get("lookback_used", LOOKBACK),
         "momentum_direction": mom_direction,
         "carry_direction":    carry_direction,
@@ -1138,11 +1187,7 @@ def run_prediction(symbol):
         "onchain":            sig["onchain"],
         "btc_dominance":      sig["btc_dominance"],
         "accuracy":           get_accuracy_stats().get("by_coin", {}).get(symbol, {}),
-        "position_size":      compute_position_size(
-                                  upside_prob, confidence,
-                                  signal_context.get("regime", "Unknown"),
-                                  last_price, float(lower[-1]), float(upper[-1])
-                              ),
+        "position_size":      None,
         "forecast": {
             "timestamps": [str(t) for t in pred["future_times"]],
             "mean_close": [round(v, 4) for v in mean_close.tolist()],
@@ -1155,41 +1200,17 @@ def run_prediction(symbol):
         }
     }
 
-    result = json.loads(json.dumps(result, default=lambda x: float(x) if hasattr(x, 'item') else str(x)))
+    result = _json_safe(result)
     save_prediction(symbol, result)
-    print(f"[Kronos] {symbol} DONE. Upside={upside_prob:.1f}% Conf={confidence:.1f}% "
-          f"Signal={signal_context['trade_signal']} Regime={signal_context['regime']}", flush=True)
+    print(f"[Kronos] {symbol} DONE. SampledUpside={upside_prob:.1f}% "
+          f"Candidate={signal_context['candidate_signal']} Regime={signal_context['regime']}", flush=True)
     return result
 
 
-# ── Research-grade evaluation overrides ───────────────────────────────────────
-# The legacy functions above are retained for database compatibility.  These
-# definitions deliberately replace them before the model loader starts.
-_legacy_init_db = init_db
-
-def init_db():
-    _legacy_init_db()
-    migrations = [
-        "ALTER TABLE accuracy ADD COLUMN target_at TEXT",
-        "ALTER TABLE accuracy ADD COLUMN raw_upside_prob REAL",
-        "ALTER TABLE accuracy ADD COLUMN candidate_signal TEXT",
-        "ALTER TABLE accuracy ADD COLUMN actual_move_pct REAL",
-        "ALTER TABLE accuracy ADD COLUMN gross_return_pct REAL",
-        "ALTER TABLE accuracy ADD COLUMN net_return_pct REAL",
-        "ALTER TABLE accuracy ADD COLUMN estimated_cost_pct REAL",
-        "ALTER TABLE accuracy ADD COLUMN estimated_funding_cost_pct REAL",
-        "ALTER TABLE paper_trades ADD COLUMN target_at TEXT",
-        "ALTER TABLE paper_trades ADD COLUMN gross_pnl_pct REAL",
-        "ALTER TABLE paper_trades ADD COLUMN net_pnl_pct REAL",
-        "ALTER TABLE paper_trades ADD COLUMN estimated_cost_pct REAL",
-        "ALTER TABLE paper_trades ADD COLUMN estimated_funding_cost_pct REAL",
-    ]
-    for sql in migrations:
-        try:
-            with sqlite3.connect(DB_FILE) as conn:
-                conn.execute(sql)
-        except sqlite3.OperationalError:
-            pass
+# ── Research-grade evaluation ─────────────────────────────────────────────────
+# The active persistence and evaluation functions below are the only runtime
+# implementations.  Older pre-validation routines are deliberately named
+# ``_deprecated_*`` above so they cannot silently replace this research path.
 
 
 def _as_utc(value):
@@ -1201,10 +1222,10 @@ def fetch_exact_hourly_close(symbol, target_at):
     """Return only a fully closed, exact target-hour candle; never a live price."""
     target = _as_utc(target_at)
     start_ms = int(target.timestamp() * 1000)
-    r = requests.get("https://api.binance.com/api/v3/klines", params={
+    endpoint = "https://fapi.binance.com/fapi/v1/klines" if EXECUTION_VENUE == "futures" else "https://api.binance.com/api/v3/klines"
+    r = _request_with_retry(endpoint, params={
         "symbol": COINS[symbol], "interval": "1h", "startTime": start_ms, "limit": 1
-    }, timeout=(3, 10))
-    r.raise_for_status()
+    })
     candles = r.json()
     if not candles or int(candles[0][0]) != start_ms:
         return None
@@ -1221,7 +1242,7 @@ def save_prediction(symbol, result):
         candidate = result.get("signal_context", {}).get("candidate_signal", "NO_TRADE")
         rate = result.get("funding", {}).get("rate")
         funding_cost = 0.0
-        if rate is not None and candidate in ("LONG", "SHORT"):
+        if EXECUTION_VENUE == "futures" and rate is not None and candidate in ("LONG", "SHORT"):
             # Positive funding is paid by longs; this is an estimate recorded at entry.
             funding_cost = float(rate) * FUNDING_INTERVALS_PER_HORIZON * (1 if candidate == "LONG" else -1)
         estimated_cost = ROUND_TRIP_COST_PCT + funding_cost
@@ -1235,17 +1256,18 @@ def save_prediction(symbol, result):
                 conn.execute("""
                     INSERT INTO accuracy
                     (symbol, predicted_at, target_timestamp, target_at, entry_price,
-                     predicted_price, upside_prob, raw_upside_prob, confidence,
+                     predicted_price, upside_prob, raw_upside_prob,
                      p10_at_prediction, p90_at_prediction, momentum_direction,
                      carry_direction, candidate_signal, estimated_cost_pct, estimated_funding_cost_pct)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (symbol, result["updated_at"], target_at, target_at, result["last_price"],
                       fc["mean_close"][-1], result["upside_prob"], result.get("raw_upside_prob"),
-                      0.0, fc["lower"][-1], fc["upper"][-1],
+                      fc["lower"][-1], fc["upper"][-1],
                       result.get("momentum_direction"), result.get("carry_direction"),
                       candidate, estimated_cost, funding_cost))
         with cache_lock:
             cache[symbol] = result
+        _invalidate_stats_cache()
         log_paper_trade(symbol, result)
     except Exception as e:
         print(f"[DB] Save failed: {e}", flush=True)
@@ -1295,6 +1317,7 @@ def check_accuracy():
                           round(move, 4), None if gross is None else round(gross, 4),
                           None if net is None else round(net, 4),
                           datetime.now(timezone.utc).isoformat(), row_id))
+            _invalidate_stats_cache()
     except Exception as e:
         print(f"[Accuracy] Exact-horizon check failed: {e}", flush=True)
 
@@ -1323,7 +1346,7 @@ def _block_bootstrap_lower_mean(values, block_size=5, draws=2000):
     return float(np.percentile(means, 5))
 
 
-def get_accuracy_stats():
+def _get_accuracy_stats_uncached():
     """Return descriptive accuracy plus cost-aware strategy metrics, never a claim of edge."""
     try:
         with sqlite3.connect(DB_FILE) as conn:
@@ -1382,6 +1405,19 @@ def get_accuracy_stats():
         return {"by_coin": {}, "baselines": {}, "band_stats": {}, "strategy": {}}
 
 
+def get_accuracy_stats():
+    """Cache CPU-intensive evaluation metrics briefly; outcomes invalidate it."""
+    now = time.monotonic()
+    with stats_lock:
+        if stats_cache["data"] is not None and now - stats_cache["updated_monotonic"] < 300:
+            return stats_cache["data"]
+    data = _get_accuracy_stats_uncached()
+    with stats_lock:
+        stats_cache["data"] = data
+        stats_cache["updated_monotonic"] = now
+    return data
+
+
 def log_paper_trade(symbol, result):
     if not PAPER_TRADING_ENABLED:
         return
@@ -1391,7 +1427,8 @@ def log_paper_trade(symbol, result):
     try:
         target_at = result["forecast"]["timestamps"][-1]
         rate = result.get("funding", {}).get("rate")
-        funding_cost = float(rate) * FUNDING_INTERVALS_PER_HORIZON * (1 if candidate == "LONG" else -1) if rate is not None else 0.0
+        funding_cost = (float(rate) * FUNDING_INTERVALS_PER_HORIZON * (1 if candidate == "LONG" else -1)
+                        if EXECUTION_VENUE == "futures" and rate is not None else 0.0)
         with db_lock:
             with sqlite3.connect(DB_FILE) as conn:
                 if conn.execute("SELECT 1 FROM paper_trades WHERE symbol=? AND closed=0", (symbol,)).fetchone():
@@ -1424,6 +1461,7 @@ def close_paper_trades():
                         gross_pnl_pct=?, net_pnl_pct=?, pnl_pct=?, closed_at=? WHERE id=?
                     """, (exit_price, round(gross, 4), round(net, 4), round(net, 4),
                           datetime.now(timezone.utc).isoformat(), trade_id))
+            _invalidate_stats_cache()
     except Exception as e:
         print(f"[Paper] close failed: {e}", flush=True)
 
@@ -1450,7 +1488,7 @@ def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows, onchain,
 
 # ── Model loader ───────────────────────────────────────────────────────────────
 def load_model():
-    global predictor, model_ready, model_error, MONTE_CARLO_N
+    global predictor, model_ready, model_error
     try:
         load_cache_from_disk()
         print("[Kronos] Loading tokenizer...", flush=True)
@@ -1471,7 +1509,6 @@ def load_model():
                 print(f"[Kronos] GPU failed ({e}), falling back to CPU", flush=True)
                 model = model.cpu()
 
-        MONTE_CARLO_N = 100
         device_note = "GPU connected (CPU-bound inference)" if gpu_working else "CPU"
         print(f"[Kronos] {device_note} - N={MONTE_CARLO_N}", flush=True)
 
@@ -1508,9 +1545,14 @@ def index():
 
 @app.route("/status")
 def status():
-    safe_progress = dict(progress)
+    with cache_lock:
+        safe_cache = dict(cache)
+    with state_lock:
+        safe_progress = dict(progress)
+        safe_running = dict(running)
+        safe_running_since = dict(running_since)
     coin_ages = {}
-    for sym, data in cache.items():
+    for sym, data in safe_cache.items():
         try:
             updated  = datetime.fromisoformat(data["updated_at"])
             age_mins = int((datetime.now(timezone.utc) - updated).total_seconds() // 60)
@@ -1526,10 +1568,11 @@ def status():
         "model":         MODEL_NAME,
         "device":        DEVICE_TYPE,
         "monte_carlo_n": MONTE_CARLO_N,
+        "execution_venue": EXECUTION_VENUE,
         "coins":         list(COINS.keys()),
-        "cached":        list(cache.keys()),
-        "running":       {k: v for k, v in running.items() if v},
-        "running_since": {k: v for k, v in running_since.items() if running.get(k)},
+        "cached":        list(safe_cache.keys()),
+        "running":       {k: v for k, v in safe_running.items() if v},
+        "running_since": {k: v for k, v in safe_running_since.items() if safe_running.get(k)},
         "progress":      safe_progress,
         "accuracy":      get_accuracy_stats().get("by_coin", {}),
         "requests_24h":  get_request_stats(),
@@ -1541,14 +1584,18 @@ def get_cache(symbol):
     symbol = symbol.upper()
     if symbol not in COINS:
         return jsonify({"error": f"Unknown symbol {symbol}"}), 400
-    if symbol not in cache:
+    with cache_lock:
+        cached_result = cache.get(symbol)
+    with state_lock:
+        is_running = running.get(symbol, False)
+    if cached_result is None:
         return jsonify({
             "error": f"No prediction yet for {symbol}.",
             "model_ready": model_ready,
-            "is_running":  running.get(symbol, False)
+            "is_running":  is_running
         }), 404
-    result = dict(cache[symbol])
-    result["is_running"] = running.get(symbol, False)
+    result = dict(cached_result)
+    result["is_running"] = is_running
     try:
         updated  = datetime.fromisoformat(result["updated_at"])
         age_secs = int((datetime.now(timezone.utc) - updated).total_seconds())
@@ -1583,7 +1630,9 @@ def predict(symbol):
     if not model_ready:
         return jsonify({"error": "Model not loaded yet."}), 503
     with queue_lock:
-        if running.get(symbol, False) or symbol in queued_coins:
+        with state_lock:
+            is_running = running.get(symbol, False)
+        if is_running or symbol in queued_coins:
             return jsonify({"status": "already_running_or_queued"})
         queued_coins.add(symbol)
         task_queue.put(symbol)
@@ -1643,7 +1692,9 @@ def get_real_trades():
 @app.route("/real_trades/open", methods=["POST"])
 def open_real_trade():
     try:
-        data       = request.get_json(force=True)
+        data       = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Invalid JSON"}), 400
         symbol     = data["symbol"].upper()
         direction  = data["direction"].upper()
         entry_price= float(data["entry_price"])
@@ -1660,8 +1711,9 @@ def open_real_trade():
         app_upside_prob = None
         app_predicted_price = None
         app_signal = None
-        if symbol in cache:
-            c = cache[symbol]
+        with cache_lock:
+            c = cache.get(symbol)
+        if c:
             app_upside_prob = c.get("upside_prob")
             fc = c.get("forecast", {})
             if fc.get("mean_close"):
@@ -1685,7 +1737,9 @@ def open_real_trade():
 @app.route("/real_trades/close/<int:trade_id>", methods=["POST"])
 def close_real_trade(trade_id):
     try:
-        data       = request.get_json(force=True)
+        data       = request.get_json(silent=True)
+        if not isinstance(data, dict):
+            return jsonify({"error": "Invalid JSON"}), 400
         exit_price = float(data["exit_price"])
         if not np.isfinite(exit_price) or exit_price <= 0:
             return jsonify({"error": "Exit price must be a finite positive number"}), 400

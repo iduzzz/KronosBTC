@@ -114,6 +114,22 @@ canvas{width:100%!important;height:100%!important}
 .stale-warn{color:var(--orange);font-weight:600}
 .status-row{display:flex;align-items:center;justify-content:center;gap:8px;font-size:12px;color:var(--muted2)}
 .signal-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.research-panel{background:linear-gradient(135deg,rgba(59,130,246,.16),rgba(124,58,237,.14));border:1px solid var(--accent2);border-radius:14px;padding:14px;margin:8px 0 14px}
+.research-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;margin-bottom:11px}
+.research-title{font-size:15px;font-weight:800;color:var(--text)}
+.research-sub{font-size:11px;color:var(--muted2);line-height:1.45;margin-top:3px}
+.research-status{font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;color:var(--orange);text-align:right}
+.research-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.research-tile{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;min-width:0}
+.research-label{font-size:9px;text-transform:uppercase;letter-spacing:.7px;color:var(--muted);margin-bottom:5px}
+.research-value{font-size:18px;font-weight:850;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.research-detail{font-size:10px;color:var(--muted2);line-height:1.4;margin-top:4px}
+.research-models{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:9px}
+.research-model{background:rgba(15,23,42,.46);border:1px solid var(--border);border-radius:10px;padding:10px}
+.research-model-name{font-size:12px;font-weight:750;color:var(--text)}
+.research-model-metric{font-size:17px;font-weight:850;margin-top:5px}
+.research-model-note{font-size:10px;color:var(--muted2);line-height:1.4;margin-top:4px}
+@media(max-width:700px){.research-grid{grid-template-columns:1fr 1fr}.research-models{grid-template-columns:1fr}.research-head{display:block}.research-status{text-align:left;margin-top:6px}}
 .signal-item{background:var(--card2);border:1px solid var(--border);border-radius:10px;padding:10px;text-align:center}
 .signal-val{font-size:13px;font-weight:700;margin-bottom:2px}
 .signal-label{font-size:9px;color:var(--muted);text-transform:uppercase}
@@ -256,6 +272,23 @@ canvas{width:100%!important;height:100%!important}
       <span id="updatedTimeText" style="font-size:11px;color:var(--muted2)"></span>
       <span class="badge badge-orange hidden" id="refreshBadge"><div class="spinner"></div> Refreshing...</span>
     </div>
+
+    <section class="research-panel" aria-label="Research model comparison">
+      <div class="research-head">
+        <div>
+          <div class="research-title">🔬 Fair Model Comparison</div>
+          <div class="research-sub" id="researchExplanation">Loading the measured research results…</div>
+        </div>
+        <div class="research-status" id="researchStatus">Research only</div>
+      </div>
+      <div class="research-grid">
+        <div class="research-tile"><div class="research-label">Fair tests completed</div><div class="research-value" id="researchProgress">—</div><div class="research-detail">Completed exact 24-hour outcomes</div></div>
+        <div class="research-tile"><div class="research-label">Current conclusion</div><div class="research-value" id="researchDecision">—</div><div class="research-detail">This is not a buy or sell instruction</div></div>
+        <div class="research-tile"><div class="research-label">Tested after costs</div><div class="research-value" id="researchCosts">—</div><div class="research-detail">Fee and slippage estimate per trade</div></div>
+        <div class="research-tile"><div class="research-label">Comparison rule</div><div class="research-value" id="researchRule">Same test</div><div class="research-detail">Every available method gets identical measurement rules</div></div>
+      </div>
+      <div class="research-models" id="researchModels"><div class="research-model"><div class="research-model-name">Loading models…</div></div></div>
+    </section>
 
     <!-- DASHBOARD GRID -->
     <div class="dash-grid">
@@ -770,6 +803,7 @@ function showResults(d) {
   });
   stopTimer();
   document.getElementById('results').classList.remove('hidden');
+  loadResearchComparison();
 
   var rb = document.getElementById('refreshBadge');
   if (d.is_running) rb.classList.remove('hidden');
@@ -1108,6 +1142,57 @@ function showResults(d) {
 
   drawChart(d);
   buildTable(d);
+}
+
+function loadResearchComparison() {
+  fetch(BASE + '/research-comparison')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var completed = Number(data.completed_outcomes || 0);
+      var needed = Number(data.evidence_needed || 200);
+      var status = data.status || 'Research evidence incomplete';
+      var waiting = status.indexOf('incomplete') >= 0 || status.indexOf('No model') >= 0;
+      var statusEl = document.getElementById('researchStatus');
+      statusEl.textContent = waiting ? 'Do not trade from this' : 'Research threshold only — no live trading';
+      statusEl.style.color = 'var(--orange)';
+      document.getElementById('researchExplanation').textContent = data.plain_explanation || 'Research results are loading.';
+      document.getElementById('researchProgress').textContent = completed + ' / ' + needed;
+      document.getElementById('researchDecision').textContent = waiting ? 'WAIT' : 'RESEARCH';
+      document.getElementById('researchDecision').style.color = 'var(--orange)';
+      document.getElementById('researchCosts').textContent = data.cost_pct == null ? '—' : data.cost_pct.toFixed(2) + '%';
+      document.getElementById('researchRule').textContent = 'Same test';
+
+      var holder = document.getElementById('researchModels');
+      var models = data.models || [];
+      if (!models.length) {
+        holder.innerHTML = '<div class="research-model"><div class="research-model-name">No measured outcomes yet</div><div class="research-model-note">The app will fill this in only after an exact 24-hour outcome is available.</div></div>';
+        return;
+      }
+      holder.innerHTML = models.map(function(model) {
+        var unavailable = model.state === 'not_tested';
+        var tested = Number(model.tested || 0);
+        var avg = model.avg_net_return_pct;
+        var lower = model.lower_net_return_bound_pct;
+        var drawdown = model.max_drawdown_pct;
+        var metric = unavailable ? 'NOT TESTED' : tested === 0 ? 'WAITING' : (avg >= 0 ? '+' : '') + Number(avg).toFixed(3) + '%';
+        var color = unavailable || tested === 0 ? 'var(--muted2)' : avg > 0 ? 'var(--green)' : 'var(--red)';
+        var evidence = unavailable
+          ? 'No score is shown until this model completes the same fair tests.'
+          : tested + ' fair tests · avg net result after costs' +
+            (lower == null ? '' : ' · cautious lower estimate ' + (lower >= 0 ? '+' : '') + Number(lower).toFixed(3) + '%') +
+            (drawdown == null ? '' : ' · worst measured drop ' + Number(drawdown).toFixed(2) + '%');
+        return '<div class="research-model">' +
+          '<div class="research-model-name">' + escapeHtml(model.name) + '</div>' +
+          '<div class="research-model-metric" style="color:' + color + '">' + metric + '</div>' +
+          '<div class="research-model-note">' + escapeHtml(model.plain_description || '') + '</div>' +
+          '<div class="research-model-note">' + escapeHtml(evidence) + '</div></div>';
+      }).join('');
+    })
+    .catch(function() {
+      document.getElementById('researchStatus').textContent = 'Comparison unavailable';
+      document.getElementById('researchStatus').style.color = 'var(--orange)';
+      document.getElementById('researchExplanation').textContent = 'No comparison data could be loaded. This does not create a trading signal.';
+    });
 }
 
 function buildTable(d) {

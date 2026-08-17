@@ -78,7 +78,7 @@ task_queue   = queue.Queue()
 db_lock      = threading.Lock()
 queued_coins = set()
 queue_lock   = threading.Lock()
-stats_cache  = {"data": None, "updated_monotonic": 0.0}
+stats_cache  = {"data": None, "comparison": None, "updated_monotonic": 0.0}
 stats_lock   = threading.Lock()
 lookback_cache = {}
 lookback_lock  = threading.Lock()
@@ -103,6 +103,7 @@ def _request_with_retry(url, *, params=None, headers=None, timeout=(3, 12), retr
 def _invalidate_stats_cache():
     with stats_lock:
         stats_cache["data"] = None
+        stats_cache["comparison"] = None
         stats_cache["updated_monotonic"] = 0.0
 
 
@@ -1418,6 +1419,112 @@ def get_accuracy_stats():
     return data
 
 
+def _research_metrics(rows):
+    """Describe a rule's already-realized, non-overlapping outcomes only."""
+    chosen = _non_overlapping(rows)
+    returns = [float(row[2]) for row in chosen if row[2] is not None and np.isfinite(row[2])]
+    if not returns:
+        return {"tested": 0, "wins": 0, "win_rate": None, "avg_net_return_pct": None,
+                "lower_net_return_bound_pct": None, "max_drawdown_pct": None}
+    lower = _block_bootstrap_lower_mean(returns)
+    equity, peak, max_drawdown = 1.0, 1.0, 0.0
+    for value in returns:
+        equity *= 1 + value / 100
+        peak = max(peak, equity)
+        max_drawdown = min(max_drawdown, (equity / peak - 1) * 100)
+    wins = sum(value > 0 for value in returns)
+    return {
+        "tested": len(returns), "wins": wins,
+        "win_rate": round(wins / len(returns) * 100, 1),
+        "avg_net_return_pct": round(float(np.mean(returns)), 3),
+        "lower_net_return_bound_pct": round(lower, 3) if lower is not None else None,
+        "max_drawdown_pct": round(max_drawdown, 3),
+    }
+
+
+def _research_model_comparison_uncached():
+    """Fair, descriptive comparison of rules using the same labeled outcomes.
+
+    This is deliberately not a historical optimisation engine.  It only compares
+    forecasts that were saved before their exact 24-hour outcome was known.
+    """
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            rows = conn.execute("""
+                SELECT symbol, predicted_at, actual_move_pct, momentum_direction,
+                       carry_direction, candidate_signal, net_return_pct
+                FROM accuracy
+                WHERE actual_move_pct IS NOT NULL AND target_at IS NOT NULL
+            """).fetchall()
+        fair_rows = _non_overlapping([(r[0], r[1], r[2]) for r in rows])
+        completed = len(fair_rows)
+        kronos_rows, momentum_rows, carry_rows = [], [], []
+        for symbol, predicted_at, move, momentum, carry, candidate, kronos_net in rows:
+            if candidate in ("LONG", "SHORT") and kronos_net is not None:
+                kronos_rows.append((symbol, predicted_at, kronos_net))
+            if momentum in (0, 1):
+                momentum_rows.append((symbol, predicted_at,
+                                      (move if momentum == 1 else -move) - ROUND_TRIP_COST_PCT))
+            if carry in (0, 1):
+                carry_rows.append((symbol, predicted_at,
+                                   (move if carry == 1 else -move) - ROUND_TRIP_COST_PCT))
+
+        kronos = _research_metrics(kronos_rows)
+        momentum = _research_metrics(momentum_rows)
+        carry = _research_metrics(carry_rows)
+        evidence_complete = completed >= MIN_VALIDATION_OUTCOMES
+        kronos_proven = (kronos["tested"] >= MIN_VALIDATION_OUTCOMES and
+                          kronos["lower_net_return_bound_pct"] is not None and
+                          kronos["lower_net_return_bound_pct"] > 0)
+        status = ("Research evidence incomplete" if not evidence_complete else
+                  "No model validated" if not kronos_proven else
+                  "Kronos research threshold met — execution remains disabled")
+        explanation = (
+            f"{completed} fair 24-hour outcomes are complete; {MIN_VALIDATION_OUTCOMES} are required "
+            "before any model can pass the research gate."
+            if not evidence_complete else
+            "The app has not enabled trading. A positive result must still be stable across market conditions."
+        )
+        return {
+            "status": status,
+            "plain_explanation": explanation,
+            "completed_outcomes": completed,
+            "evidence_needed": MIN_VALIDATION_OUTCOMES,
+            "cost_pct": ROUND_TRIP_COST_PCT,
+            "same_rules_note": "Each available method uses the same exact 24-hour outcome, fee/slippage estimate, and non-overlap rule.",
+            "models": [
+                {"key": "kronos", "name": "Kronos candidate rule", "state": "collecting",
+                 "plain_description": "Current research candidate rule; it trades only when its stored conditions were met.", **kronos},
+                {"key": "momentum", "name": "Simple momentum baseline", "state": "available",
+                 "plain_description": "A simple check: follow the previous 24-hour direction. It is the benchmark Kronos must beat.", **momentum},
+                {"key": "carry", "name": "Funding/carry baseline", "state": "available",
+                 "plain_description": "A simple funding-rate direction rule when funding data was available.", **carry},
+                {"key": "chronos_bolt", "name": "Chronos-Bolt", "state": "not_tested",
+                 "plain_description": "Not installed or tested yet. It has no score until it completes the same fair tests.",
+                 "tested": 0, "wins": 0, "win_rate": None, "avg_net_return_pct": None,
+                 "lower_net_return_bound_pct": None, "max_drawdown_pct": None},
+            ],
+        }
+    except Exception as e:
+        print(f"[Research comparison] failed: {e}", flush=True)
+        return {"status": "Comparison unavailable", "plain_explanation": "No completed research outcomes are available yet.",
+                "completed_outcomes": 0, "evidence_needed": MIN_VALIDATION_OUTCOMES,
+                "cost_pct": ROUND_TRIP_COST_PCT, "same_rules_note": "", "models": []}
+
+
+def get_research_model_comparison():
+    """Five-minute cache shared by the visible research dashboard."""
+    now = time.monotonic()
+    with stats_lock:
+        if stats_cache["comparison"] is not None and now - stats_cache["updated_monotonic"] < 300:
+            return stats_cache["comparison"]
+    comparison = _research_model_comparison_uncached()
+    with stats_lock:
+        stats_cache["comparison"] = comparison
+        stats_cache["updated_monotonic"] = now
+    return comparison
+
+
 def log_paper_trade(symbol, result):
     if not PAPER_TRADING_ENABLED:
         return
@@ -1784,6 +1891,10 @@ def delete_real_trade(trade_id):
 @app.route("/accuracy")
 def accuracy_route():
     return jsonify(get_accuracy_stats())
+
+@app.route("/research-comparison")
+def research_comparison_route():
+    return jsonify(get_research_model_comparison())
 
 @app.route("/paper_pnl")
 def paper_pnl():

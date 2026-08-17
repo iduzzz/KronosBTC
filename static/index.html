@@ -170,7 +170,7 @@ canvas{width:100%!important;height:100%!important}
     <div class="info-row"><span class="info-label">Lookback</span><span class="info-val">384h (16 days)</span></div>
     <div class="info-row"><span class="info-label">Refresh</span><span class="info-val">Manual only</span></div>
     <div class="info-row"><span class="info-label">Requests (24h)</span><span class="info-val" id="infoRequests">-</span></div>
-    <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">ZEC BTC TAO ETH</span></div>
+    <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">ZEC BTC TAO ETH SOL</span></div>
   </div>
   <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
     <div class="drawer-section-title">Capital Settings</div>
@@ -197,6 +197,7 @@ canvas{width:100%!important;height:100%!important}
   <span class="coin-btn" onclick="selectCoin('BTC')" id="btn-BTC">BTC</span>
   <span class="coin-btn" onclick="selectCoin('TAO')" id="btn-TAO">TAO</span>
   <span class="coin-btn" onclick="selectCoin('ETH')" id="btn-ETH">ETH</span>
+  <span class="coin-btn" onclick="selectCoin('SOL')" id="btn-SOL">SOL</span>
   <span class="coin-btn" onclick="refreshAll()" id="btn-all" style="border-color:var(--purple);color:var(--purple)">All</span>
 </div>
 
@@ -524,8 +525,8 @@ canvas{width:100%!important;height:100%!important}
 
 <script>
 var BASE = window.location.origin;
-var COINS = ['ZEC','BTC','TAO','ETH'];
-var BSYMS = {ZEC:'ZECUSDT',BTC:'BTCUSDT',TAO:'TAOUSDT',ETH:'ETHUSDT'};
+var COINS = ['ZEC','BTC','TAO','ETH','SOL'];
+var BSYMS = {ZEC:'ZECUSDT',BTC:'BTCUSDT',TAO:'TAOUSDT',ETH:'ETHUSDT',SOL:'SOLUSDT'};
 var currentCoin = 'ZEC';
 var pollTimer = null;
 var statusData = {};
@@ -1422,7 +1423,7 @@ function loadAccuracy() {
         html += '</div>';
       }
 
-      // Per-coin — only show active coins (ZEC, BTC, TAO, ETH)
+      // Per-coin — only show configured tracked coins
       html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">By Coin</div>';
       keys = keys.filter(function(k){ return COINS.indexOf(k) >= 0; });
       keys.sort(function(a,b){ return byCoin[b].total - byCoin[a].total; });
@@ -1630,7 +1631,7 @@ checkStatus();
         <div>
           <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Coin</div>
           <select id="jCoin" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
-            <option>ZEC</option><option>BTC</option><option>TAO</option><option>ETH</option>
+            <option>ZEC</option><option>BTC</option><option>TAO</option><option>ETH</option><option>SOL</option>
           </select>
         </div>
         <div>

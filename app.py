@@ -55,6 +55,7 @@ MIN_VALIDATION_OUTCOMES = 200
 
 COINS = {
     "ZEC": "ZECUSDT", "BTC": "BTCUSDT", "TAO": "TAOUSDT", "ETH": "ETHUSDT",
+    "SOL": "SOLUSDT",
 }
 
 predictor    = None

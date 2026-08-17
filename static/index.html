@@ -812,9 +812,23 @@ function showResults(d) {
     var ps = d.position_size;
     var active = (sig === 'LONG' || sig === 'SHORT');
 
-    // Hide completely when no actionable signal — showing numbers with NO TRADE is confusing
-    if (!active) {
-      psCard.classList.add('hidden');
+    if (!active || ps.disabled) {
+      if (ps.disabled && active) {
+        // Show disabled warning when signal fires but Kelly is off
+        psCard.classList.remove('hidden');
+        psCard.style.opacity = '1';
+        document.getElementById('psSize').textContent = 'UNVALIDATED';
+        document.getElementById('psSize').style.color = 'var(--orange)';
+        document.getElementById('psStop').textContent = fmt(ps.stop_loss);
+        document.getElementById('psTarget').textContent = fmt(ps.take_profit);
+        document.getElementById('psRisk').textContent = '—';
+        document.getElementById('psMax').textContent = 'NO POSITION SIZE — model edge not validated';
+        currentStopPrice   = ps.stop_loss;
+        currentTargetPrice = ps.take_profit;
+        window._lastSignal = sig;
+      } else {
+        psCard.classList.add('hidden');
+      }
     } else {
       psCard.classList.remove('hidden');
       psCard.style.opacity = '1';

@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import requests
 from flask import Flask, jsonify, send_from_directory, request
-from flask_cors import CORS
 import torch
 
 # ── GPU Setup ─────────────────────────────────────────────────────────────────
@@ -33,7 +32,6 @@ from model import Kronos, KronosTokenizer, KronosPredictor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app      = Flask(__name__, static_folder=os.path.join(BASE_DIR, 'static'))
-CORS(app)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 MODEL_NAME     = "NeoQuasar/Kronos-base"
@@ -44,6 +42,16 @@ MONTE_CARLO_N  = 100
 REFRESH_SECS   = 3600
 NUM_WORKERS    = 1
 DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
+
+# This application is a local research tool.  It deliberately has no exchange
+# credentials or order-submission code.  Paper mode must be explicitly enabled.
+APP_MODE = os.environ.get("KRONOS_APP_MODE", "research").lower()
+PAPER_TRADING_ENABLED = APP_MODE == "paper"
+TAKER_FEE_PCT = float(os.environ.get("KRONOS_TAKER_FEE_PCT", "0.10"))
+SLIPPAGE_PCT = float(os.environ.get("KRONOS_SLIPPAGE_PCT", "0.05"))
+ROUND_TRIP_COST_PCT = 2 * (TAKER_FEE_PCT + SLIPPAGE_PCT)
+FUNDING_INTERVALS_PER_HORIZON = PRED_LEN / 8
+MIN_VALIDATION_OUTCOMES = 200
 
 COINS = {
     "ZEC": "ZECUSDT", "BTC": "BTCUSDT", "TAO": "TAOUSDT", "ETH": "ETHUSDT",
@@ -382,12 +390,8 @@ def check_accuracy():
                     except Exception as e:
                         print(f"[Accuracy] {symbol} candle fetch failed: {e}, falling back to ticker", flush=True)
 
-                # Fallback to live ticker
-                if actual is None:
-                    r = requests.get("https://api.binance.com/api/v3/ticker/price",
-                                     params={"symbol": COINS[symbol]}, timeout=(3, 10))
-                    if r.ok:
-                        actual = float(r.json()["price"])
+                # Never fall back to a live ticker for a historical label.
+                # Leave the row pending until the exact closed candle is available.
 
                 if actual is not None:
 
@@ -734,13 +738,12 @@ def fetch_candles(symbol, interval="1h", limit=384):
                 df[c] = df[c].astype(float)
             df = df[["timestamps","open","high","low","close","volume"]].reset_index(drop=True)
 
-            # #2: Drop incomplete last candle
+            # Exclude an open candle even during the final minute of its hour.
             now = datetime.now(timezone.utc)
-            last_candle_time = df["timestamps"].iloc[-1]
-            candle_age = (now - last_candle_time).total_seconds()
-            if candle_age < 59 * 60:  # less than 59 minutes old = still forming
+            last_close_time = pd.to_datetime(int(raw[-1][6]), unit="ms", utc=True)
+            if last_close_time.to_pydatetime() > now:
                 df = df.iloc[:-1].reset_index(drop=True)
-                print(f"[Data] {symbol} dropped incomplete last candle ({candle_age/60:.1f}min old)", flush=True)
+                print(f"[Data] {symbol} dropped incomplete last candle", flush=True)
 
             print(f"[Data] {symbol} {interval} OK ({len(df)} candles)", flush=True)
             return df
@@ -1071,7 +1074,7 @@ def run_prediction(symbol):
 
     final_prices    = closes[:, -1]
     raw_upside_prob = float((final_prices > last_price).mean()) * 100
-    upside_prob     = float(max(5.0, min(95.0, raw_upside_prob)))
+    upside_prob     = raw_upside_prob  # sampled paths are not calibrated probabilities
 
     std_pct      = std / last_price * 100
     hist_vol_pct = float(df["close"].pct_change().dropna().std() * 100)
@@ -1118,7 +1121,9 @@ def run_prediction(symbol):
         "upside_prob":        round(upside_prob, 1),
         "raw_upside_prob":    round(raw_upside_prob, 1),
         "hallucinating":      hallucinating,
-        "confidence":         confidence,
+        "confidence":         None,
+        "probability_status": "uncalibrated_research_only",
+        "forecast_dispersion_ratio": round(spread_ratio, 3),
         "lookback_used":      pred.get("lookback_used", LOOKBACK),
         "momentum_direction": mom_direction,
         "carry_direction":    carry_direction,
@@ -1152,6 +1157,276 @@ def run_prediction(symbol):
     print(f"[Kronos] {symbol} DONE. Upside={upside_prob:.1f}% Conf={confidence:.1f}% "
           f"Signal={signal_context['trade_signal']} Regime={signal_context['regime']}", flush=True)
     return result
+
+
+# ── Research-grade evaluation overrides ───────────────────────────────────────
+# The legacy functions above are retained for database compatibility.  These
+# definitions deliberately replace them before the model loader starts.
+_legacy_init_db = init_db
+
+def init_db():
+    _legacy_init_db()
+    migrations = [
+        "ALTER TABLE accuracy ADD COLUMN target_at TEXT",
+        "ALTER TABLE accuracy ADD COLUMN raw_upside_prob REAL",
+        "ALTER TABLE accuracy ADD COLUMN candidate_signal TEXT",
+        "ALTER TABLE accuracy ADD COLUMN actual_move_pct REAL",
+        "ALTER TABLE accuracy ADD COLUMN gross_return_pct REAL",
+        "ALTER TABLE accuracy ADD COLUMN net_return_pct REAL",
+        "ALTER TABLE accuracy ADD COLUMN estimated_cost_pct REAL",
+        "ALTER TABLE accuracy ADD COLUMN estimated_funding_cost_pct REAL",
+        "ALTER TABLE paper_trades ADD COLUMN target_at TEXT",
+        "ALTER TABLE paper_trades ADD COLUMN gross_pnl_pct REAL",
+        "ALTER TABLE paper_trades ADD COLUMN net_pnl_pct REAL",
+        "ALTER TABLE paper_trades ADD COLUMN estimated_cost_pct REAL",
+        "ALTER TABLE paper_trades ADD COLUMN estimated_funding_cost_pct REAL",
+    ]
+    for sql in migrations:
+        try:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute(sql)
+        except sqlite3.OperationalError:
+            pass
+
+
+def _as_utc(value):
+    stamp = pd.Timestamp(value)
+    return stamp.tz_localize("UTC") if stamp.tzinfo is None else stamp.tz_convert("UTC")
+
+
+def fetch_exact_hourly_close(symbol, target_at):
+    """Return only a fully closed, exact target-hour candle; never a live price."""
+    target = _as_utc(target_at)
+    start_ms = int(target.timestamp() * 1000)
+    r = requests.get("https://api.binance.com/api/v3/klines", params={
+        "symbol": COINS[symbol], "interval": "1h", "startTime": start_ms, "limit": 1
+    }, timeout=(3, 10))
+    r.raise_for_status()
+    candles = r.json()
+    if not candles or int(candles[0][0]) != start_ms:
+        return None
+    close_time = pd.to_datetime(int(candles[0][6]), unit="ms", utc=True)
+    if close_time >= pd.Timestamp.now(tz="UTC"):
+        return None
+    return float(candles[0][4])
+
+
+def save_prediction(symbol, result):
+    """Persist every forecast with its actual model target, before outcomes exist."""
+    try:
+        target_at = result["forecast"]["timestamps"][-1]
+        candidate = result.get("signal_context", {}).get("candidate_signal", "NO_TRADE")
+        rate = result.get("funding", {}).get("rate")
+        funding_cost = 0.0
+        if rate is not None and candidate in ("LONG", "SHORT"):
+            # Positive funding is paid by longs; this is an estimate recorded at entry.
+            funding_cost = float(rate) * FUNDING_INTERVALS_PER_HORIZON * (1 if candidate == "LONG" else -1)
+        estimated_cost = ROUND_TRIP_COST_PCT + funding_cost
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                conn.execute("""
+                    INSERT OR REPLACE INTO predictions (symbol, data, updated_at, error)
+                    VALUES (?, ?, ?, NULL)
+                """, (symbol, json.dumps(result), result["updated_at"]))
+                fc = result["forecast"]
+                conn.execute("""
+                    INSERT INTO accuracy
+                    (symbol, predicted_at, target_timestamp, target_at, entry_price,
+                     predicted_price, upside_prob, raw_upside_prob, confidence,
+                     p10_at_prediction, p90_at_prediction, momentum_direction,
+                     carry_direction, candidate_signal, estimated_cost_pct, estimated_funding_cost_pct)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (symbol, result["updated_at"], target_at, target_at, result["last_price"],
+                      fc["mean_close"][-1], result["upside_prob"], result.get("raw_upside_prob"),
+                      0.0, fc["lower"][-1], fc["upper"][-1],
+                      result.get("momentum_direction"), result.get("carry_direction"),
+                      candidate, estimated_cost, funding_cost))
+        with cache_lock:
+            cache[symbol] = result
+        log_paper_trade(symbol, result)
+    except Exception as e:
+        print(f"[DB] Save failed: {e}", flush=True)
+
+
+def check_accuracy():
+    """Label outcomes with the exact closed candle specified at forecast time."""
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                rows = conn.execute("""
+                    SELECT id, symbol, entry_price, upside_prob, p10_at_prediction,
+                           p90_at_prediction, momentum_direction, carry_direction,
+                           target_at, candidate_signal, estimated_cost_pct
+                    FROM accuracy
+                    WHERE actual_price IS NULL AND target_at IS NOT NULL
+                """).fetchall()
+        for row in rows:
+            (row_id, symbol, entry, upside, p10, p90, mom, carry, target_at,
+             candidate, cost) = row
+            if symbol not in COINS:
+                continue
+            actual = fetch_exact_hourly_close(symbol, target_at)
+            if actual is None:
+                continue
+            move = (actual / entry - 1) * 100
+            direction_correct = int((upside >= 50 and actual > entry) or (upside < 50 and actual <= entry))
+            if candidate == "LONG":
+                gross = move
+            elif candidate == "SHORT":
+                gross = -move
+            else:
+                gross = net = None
+            if candidate in ("LONG", "SHORT"):
+                net = gross - (cost if cost is not None else ROUND_TRIP_COST_PCT)
+            band = int(p10 <= actual <= p90) if p10 is not None and p90 is not None else None
+            mom_correct = int((mom == 1 and actual > entry) or (mom == 0 and actual <= entry)) if mom is not None else None
+            carry_correct = int((carry == 1 and actual > entry) or (carry == 0 and actual <= entry)) if carry is not None else None
+            flat_correct = int(abs(move) < 1.0)
+            with db_lock:
+                with sqlite3.connect(DB_FILE) as conn:
+                    conn.execute("""
+                        UPDATE accuracy SET actual_price=?, direction_correct=?, inside_band=?,
+                          momentum_correct=?, carry_correct=?, flat_correct=?, actual_move_pct=?,
+                          gross_return_pct=?, net_return_pct=?, checked_at=? WHERE id=?
+                    """, (actual, direction_correct, band, mom_correct, carry_correct, flat_correct,
+                          round(move, 4), None if gross is None else round(gross, 4),
+                          None if net is None else round(net, 4),
+                          datetime.now(timezone.utc).isoformat(), row_id))
+    except Exception as e:
+        print(f"[Accuracy] Exact-horizon check failed: {e}", flush=True)
+
+
+def _non_overlapping(rows):
+    chosen, next_allowed = [], {}
+    for row in sorted(rows, key=lambda r: (r[0], r[1])):
+        symbol, predicted_at = row[0], _as_utc(row[1])
+        if predicted_at >= next_allowed.get(symbol, pd.Timestamp("1970-01-01", tz="UTC")):
+            chosen.append(row)
+            next_allowed[symbol] = predicted_at + pd.Timedelta(hours=PRED_LEN)
+    return chosen
+
+
+def get_accuracy_stats():
+    """Return descriptive accuracy plus cost-aware strategy metrics, never a claim of edge."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            all_rows = conn.execute("""
+                SELECT symbol, COUNT(*), SUM(direction_correct)
+                FROM accuracy WHERE direction_correct IS NOT NULL AND target_at IS NOT NULL GROUP BY symbol
+            """).fetchall()
+            strategy_rows = conn.execute("""
+                SELECT symbol, predicted_at, net_return_pct, gross_return_pct, actual_move_pct
+                FROM accuracy WHERE net_return_pct IS NOT NULL
+            """).fetchall()
+            baseline = conn.execute("""
+                SELECT COUNT(*), SUM(direction_correct), SUM(momentum_correct), SUM(carry_correct), SUM(flat_correct)
+                FROM accuracy WHERE direction_correct IS NOT NULL AND target_at IS NOT NULL
+            """).fetchone()
+            band = conn.execute("SELECT COUNT(*), SUM(inside_band) FROM accuracy WHERE inside_band IS NOT NULL AND target_at IS NOT NULL").fetchone()
+        by_coin = {s: {"total": n, "correct": c or 0, "pct": round((c or 0) / n * 100, 1)} for s, n, c in all_rows}
+        non_overlapping = _non_overlapping(strategy_rows)
+        returns = [r[2] for r in non_overlapping]
+        gross_returns = [r[3] for r in non_overlapping]
+        moves = [abs(r[4]) for r in non_overlapping]
+        wins = sum(1 for x in returns if x > 0)
+        profit_factor = (sum(x for x in returns if x > 0) / abs(sum(x for x in returns if x < 0))
+                         if any(x < 0 for x in returns) else None)
+        equity, peak, max_drawdown = 1.0, 1.0, 0.0
+        for value in returns:
+            equity *= 1 + value / 100
+            peak = max(peak, equity)
+            max_drawdown = min(max_drawdown, (equity / peak - 1) * 100)
+        strategy = {
+            "total": len(returns), "wins": wins,
+            "win_rate": round(wins / len(returns) * 100, 1) if returns else None,
+            "avg_net_return_pct": round(float(np.mean(returns)), 3) if returns else None,
+            "median_net_return_pct": round(float(np.median(returns)), 3) if returns else None,
+            "avg_gross_return_pct": round(float(np.mean(gross_returns)), 3) if gross_returns else None,
+            "avg_abs_move_pct": round(float(np.mean(moves)), 3) if moves else None,
+            "profit_factor": round(float(profit_factor), 2) if profit_factor is not None else None,
+            "max_drawdown_pct": round(max_drawdown, 3),
+            "cost_pct": ROUND_TRIP_COST_PCT,
+            "non_overlapping": True,
+            "validated": len(returns) >= MIN_VALIDATION_OUTCOMES and float(np.mean(returns)) > 0,
+        }
+        b = baseline or (0, 0, 0, 0, 0)
+        baselines = {"total": b[0] or 0, "kronos_pct": round((b[1] or 0) / b[0] * 100, 1) if b[0] else None,
+                     "momentum_pct": round((b[2] or 0) / b[0] * 100, 1) if b[0] else None,
+                     "carry_pct": round((b[3] or 0) / b[0] * 100, 1) if b[0] else None,
+                     "flat_pct": round((b[4] or 0) / b[0] * 100, 1) if b[0] else None}
+        return {"by_coin": by_coin, "baselines": baselines,
+                "band_stats": {"total": band[0] or 0, "hits": band[1] or 0,
+                               "pct": round((band[1] or 0) / band[0] * 100, 1) if band[0] else None},
+                "strategy": strategy}
+    except Exception as e:
+        print(f"[Stats] failed: {e}", flush=True)
+        return {"by_coin": {}, "baselines": {}, "band_stats": {}, "strategy": {}}
+
+
+def log_paper_trade(symbol, result):
+    if not PAPER_TRADING_ENABLED:
+        return
+    candidate = result.get("signal_context", {}).get("candidate_signal")
+    if candidate not in ("LONG", "SHORT"):
+        return
+    try:
+        target_at = result["forecast"]["timestamps"][-1]
+        rate = result.get("funding", {}).get("rate")
+        funding_cost = float(rate) * FUNDING_INTERVALS_PER_HORIZON * (1 if candidate == "LONG" else -1) if rate is not None else 0.0
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                if conn.execute("SELECT 1 FROM paper_trades WHERE symbol=? AND closed=0", (symbol,)).fetchone():
+                    return
+                conn.execute("""
+                    INSERT INTO paper_trades (symbol, predicted_at, target_at, direction, entry_price,
+                      stop_price, target_price, size_pct, risk_pct, estimated_cost_pct, estimated_funding_cost_pct)
+                    VALUES (?, ?, ?, ?, ?, 0, 0, 0, 0, ?, ?)
+                """, (symbol, result["updated_at"], target_at, candidate, result["last_price"],
+                      ROUND_TRIP_COST_PCT + funding_cost, funding_cost))
+    except Exception as e:
+        print(f"[Paper] log failed: {e}", flush=True)
+
+
+def close_paper_trades():
+    try:
+        with db_lock:
+            with sqlite3.connect(DB_FILE) as conn:
+                rows = conn.execute("SELECT id, symbol, direction, entry_price, target_at, estimated_cost_pct FROM paper_trades WHERE closed=0 AND target_at IS NOT NULL").fetchall()
+        for trade_id, symbol, direction, entry, target_at, cost in rows:
+            exit_price = fetch_exact_hourly_close(symbol, target_at)
+            if exit_price is None:
+                continue
+            gross = ((exit_price / entry - 1) * 100) if direction == "LONG" else ((1 - exit_price / entry) * 100)
+            net = gross - (cost if cost is not None else ROUND_TRIP_COST_PCT)
+            with db_lock:
+                with sqlite3.connect(DB_FILE) as conn:
+                    conn.execute("""
+                      UPDATE paper_trades SET closed=1, exit_price=?, exit_reason='HORIZON_CLOSE',
+                        gross_pnl_pct=?, net_pnl_pct=?, pnl_pct=?, closed_at=? WHERE id=?
+                    """, (exit_price, round(gross, 4), round(net, 4), round(net, 4),
+                          datetime.now(timezone.utc).isoformat(), trade_id))
+    except Exception as e:
+        print(f"[Paper] close failed: {e}", flush=True)
+
+
+def compute_position_size(*_args, **_kwargs):
+    return None
+
+
+def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows, onchain, btc_dominance, symbol):
+    # This preserves the existing heuristic as a research candidate only.
+    candidate = "NO_TRADE"
+    adx, fund = ind.get("adx", 0), funding.get("rate")
+    if fund is not None and adx >= 20:
+        if upside_prob > 60 and ind.get("macd_hist", 0) > 0 and ind.get("rsi", 50) < 70:
+            candidate = "LONG"
+        elif upside_prob < 40 and ind.get("macd_hist", 0) < 0 and ind.get("rsi", 50) > 30:
+            candidate = "SHORT"
+    return {"confirmations": [], "warnings": [], "context": "Research candidate; not a trade instruction",
+            "n_confirm": 0, "n_warn": 0, "candidate_signal": candidate,
+            "trade_signal": candidate if PAPER_TRADING_ENABLED else "RESEARCH_ONLY",
+            "circuit_msg": "Signals remain research-only until independent net-return validation.",
+            "regime": ind.get("regime", "Unknown"), "adx": adx}
 
 
 # ── Model loader ───────────────────────────────────────────────────────────────
@@ -1224,6 +1499,9 @@ def status():
         except Exception:
             pass
     return jsonify({
+        "app_mode":      APP_MODE,
+        "paper_trading_enabled": PAPER_TRADING_ENABLED,
+        "round_trip_cost_pct": ROUND_TRIP_COST_PCT,
         "model_ready":   model_ready,
         "model_error":   model_error,
         "model":         MODEL_NAME,
@@ -1346,11 +1624,15 @@ def get_real_trades():
 @app.route("/real_trades/open", methods=["POST"])
 def open_real_trade():
     try:
-        data       = request.get_json()
+        data       = request.get_json(force=True)
         symbol     = data["symbol"].upper()
         direction  = data["direction"].upper()
         entry_price= float(data["entry_price"])
         amount_usd = float(data["amount_usd"])
+        if symbol not in COINS or direction not in ("LONG", "SHORT"):
+            return jsonify({"error": "Invalid symbol or direction"}), 400
+        if not np.isfinite(entry_price) or not np.isfinite(amount_usd) or entry_price <= 0 or amount_usd <= 0:
+            return jsonify({"error": "Entry price and amount must be finite positive numbers"}), 400
         quantity   = amount_usd / entry_price
         entry_time = data.get("entry_time", datetime.now(timezone.utc).isoformat())
         notes      = data.get("notes", "")
@@ -1384,8 +1666,10 @@ def open_real_trade():
 @app.route("/real_trades/close/<int:trade_id>", methods=["POST"])
 def close_real_trade(trade_id):
     try:
-        data       = request.get_json()
+        data       = request.get_json(force=True)
         exit_price = float(data["exit_price"])
+        if not np.isfinite(exit_price) or exit_price <= 0:
+            return jsonify({"error": "Exit price must be a finite positive number"}), 400
         exit_time  = data.get("exit_time", datetime.now(timezone.utc).isoformat())
 
         with db_lock:

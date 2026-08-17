@@ -846,8 +846,10 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
     closes = np.array(all_closes)
     progress.pop(symbol, None)
 
-    # Use greedy path as mean if available, else MC mean
-    mean_close = greedy_close if greedy_close is not None else closes.mean(axis=0)
+    # The displayed central forecast must match the uncertainty bands: both
+    # are derived from the same Monte Carlo population.  A separate greedy
+    # path can be useful for diagnostics, but is not a statistical mean.
+    mean_close = closes.mean(axis=0)
 
     return {
         "mean":         mean_close,
@@ -1307,6 +1309,20 @@ def _non_overlapping(rows):
     return chosen
 
 
+def _block_bootstrap_lower_mean(values, block_size=5, draws=2000):
+    """Conservative 5th-percentile mean using contiguous return blocks."""
+    values = np.asarray(values, dtype=float)
+    if not len(values):
+        return None
+    blocks = [values[i:i + block_size] for i in range(0, len(values), block_size)]
+    rng = np.random.default_rng(20260818)
+    means = []
+    for _ in range(draws):
+        sampled = np.concatenate([blocks[i] for i in rng.integers(0, len(blocks), len(blocks))])[:len(values)]
+        means.append(sampled.mean())
+    return float(np.percentile(means, 5))
+
+
 def get_accuracy_stats():
     """Return descriptive accuracy plus cost-aware strategy metrics, never a claim of edge."""
     try:
@@ -1329,6 +1345,7 @@ def get_accuracy_stats():
         returns = [r[2] for r in non_overlapping]
         gross_returns = [r[3] for r in non_overlapping]
         moves = [abs(r[4]) for r in non_overlapping]
+        lower_mean = _block_bootstrap_lower_mean(returns)
         wins = sum(1 for x in returns if x > 0)
         profit_factor = (sum(x for x in returns if x > 0) / abs(sum(x for x in returns if x < 0))
                          if any(x < 0 for x in returns) else None)
@@ -1346,9 +1363,10 @@ def get_accuracy_stats():
             "avg_abs_move_pct": round(float(np.mean(moves)), 3) if moves else None,
             "profit_factor": round(float(profit_factor), 2) if profit_factor is not None else None,
             "max_drawdown_pct": round(max_drawdown, 3),
+            "lower_net_return_bound_pct": round(lower_mean, 3) if lower_mean is not None else None,
             "cost_pct": ROUND_TRIP_COST_PCT,
             "non_overlapping": True,
-            "validated": len(returns) >= MIN_VALIDATION_OUTCOMES and float(np.mean(returns)) > 0,
+            "validated": len(returns) >= MIN_VALIDATION_OUTCOMES and lower_mean is not None and lower_mean > 0,
         }
         b = baseline or (0, 0, 0, 0, 0)
         baselines = {"total": b[0] or 0, "kronos_pct": round((b[1] or 0) / b[0] * 100, 1) if b[0] else None,

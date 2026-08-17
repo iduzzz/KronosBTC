@@ -1336,7 +1336,6 @@ function loadAccuracy() {
     .then(function(data) {
       var el = document.getElementById('accuracyList');
       var byCoin = data.by_coin || {};
-      var byConf = data.by_confidence || {};
       var baselines = data.baselines || {};
       var bandStats = data.band_stats || {};
       var strategy = data.strategy || {};
@@ -1409,25 +1408,6 @@ function loadAccuracy() {
         html += '</div>';
       }
 
-      // Confidence buckets
-      var confKeys = ['high','medium','low'];
-      var confLabels = {high:'High Confidence (>=80%)',medium:'Medium (60-80%)',low:'Low (<60%)'};
-      var hasConf = confKeys.some(function(k){ return byConf[k]; });
-      if (hasConf) {
-        html += '<div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px">';
-        html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:10px">Accuracy by Confidence</div>';
-        confKeys.forEach(function(k) {
-          var b = byConf[k];
-          if (!b) return;
-          var bColor = b.pct >= 55 ? 'var(--green)' : b.pct >= 45 ? 'var(--orange)' : 'var(--red)';
-          html += '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-top:1px solid var(--border)">' +
-            '<div><div style="font-size:12px;font-weight:600">' + confLabels[k] + '</div>' +
-            '<div style="font-size:11px;color:var(--muted2)">' + b.correct + '/' + b.total + ' correct</div></div>' +
-            '<div style="font-size:18px;font-weight:800;color:' + bColor + '">' + b.pct + '%</div></div>';
-        });
-        html += '</div>';
-      }
-
       // Per-coin — only show configured tracked coins
       html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">By Coin</div>';
       keys = keys.filter(function(k){ return COINS.indexOf(k) >= 0; });
@@ -1474,8 +1454,6 @@ function computeTradeScore(d) {
   var adx      = sc.adx || (d.indicators && d.indicators.adx) || 0;
   var nConf    = sc.n_confirm || 0;
   var nWarn    = sc.n_warn || 0;
-  var conf     = d.confidence || 0;
-  var hall     = d.hallucinating || false;
   var up       = d.upside_prob || 50;
   var accPct   = (d.accuracy && d.accuracy.total >= 5) ? d.accuracy.pct : 50;
   var fc       = d.forecast;
@@ -1501,10 +1479,10 @@ function computeTradeScore(d) {
       detail: nConf + ' signals confirm, ' + nWarn + ' signals warn against'
     },
     {
-      name: 'Model Confidence',
-      what: 'Is the AI certain or guessing?',
-      pct: hall ? 0 : Math.min(Math.round(conf), 100),
-      detail: hall ? 'HALLUCINATING — AI predicted range too narrow, do not trust' : 'Confidence: ' + conf + '%'
+      name: 'Forecast calibration',
+      what: 'Has the displayed probability been empirically validated?',
+      pct: 0,
+      detail: 'Not calibrated yet — it must not be used as a probability of profit.'
     },
     {
       name: 'Historical Accuracy',

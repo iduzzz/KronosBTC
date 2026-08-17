@@ -80,6 +80,7 @@ def init_db():
                 id                  INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol              TEXT NOT NULL,
                 predicted_at        TEXT NOT NULL,
+                target_timestamp     TEXT,
                 entry_price         REAL NOT NULL DEFAULT 0,
                 predicted_price     REAL NOT NULL,
                 upside_prob         REAL NOT NULL,
@@ -154,6 +155,7 @@ def init_db():
 
     # Migrations for existing databases
     migrations = [
+        "ALTER TABLE accuracy ADD COLUMN target_timestamp TEXT",
         "ALTER TABLE accuracy ADD COLUMN entry_price REAL NOT NULL DEFAULT 0",
         "ALTER TABLE accuracy ADD COLUMN p10_at_prediction REAL",
         "ALTER TABLE accuracy ADD COLUMN p90_at_prediction REAL",
@@ -195,13 +197,18 @@ def save_prediction(symbol, result):
                 mom_dir   = result.get("momentum_direction")
                 carry_dir = result.get("carry_direction")
 
+                # Exact target timestamp: 24h after prediction, rounded to hour
+                pred_time = datetime.fromisoformat(result["updated_at"])
+                target_ts = (pred_time + pd.Timedelta(hours=24)).replace(
+                    minute=0, second=0, microsecond=0).isoformat()
+
                 conn.execute("""
                     INSERT INTO accuracy
-                    (symbol, predicted_at, entry_price, predicted_price, upside_prob,
+                    (symbol, predicted_at, target_timestamp, entry_price, predicted_price, upside_prob,
                      confidence, p10_at_prediction, p90_at_prediction,
                      momentum_direction, carry_direction)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (symbol, result["updated_at"], entry, target,
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (symbol, result["updated_at"], target_ts, entry, target,
                       result["upside_prob"], conf, p10, p90, mom_dir, carry_dir))
                 conn.commit()
 
@@ -346,7 +353,7 @@ def check_accuracy():
                 rows = conn.execute("""
                     SELECT id, symbol, entry_price, upside_prob,
                            p10_at_prediction, p90_at_prediction,
-                           momentum_direction, carry_direction
+                           momentum_direction, carry_direction, target_timestamp
                     FROM accuracy
                     WHERE actual_price IS NULL
                     AND datetime(predicted_at) < datetime('now', '-24 hours')
@@ -354,14 +361,35 @@ def check_accuracy():
 
         for row in rows:
             (row_id, symbol, entry_price, upside_prob,
-             p10, p90, mom_dir, carry_dir) = row
+             p10, p90, mom_dir, carry_dir) = row[:8]
+            target_ts = row[8] if len(row) > 8 else None
             if symbol not in COINS:
                 continue
             try:
-                r = requests.get("https://api.binance.com/api/v3/ticker/price",
-                                 params={"symbol": COINS[symbol]}, timeout=(3, 10))
-                if r.ok:
-                    actual = float(r.json()["price"])
+                actual = None
+                # Use exact target candle close if timestamp stored
+                if target_ts:
+                    try:
+                        ts_dt = datetime.fromisoformat(target_ts)
+                        ts_ms = int(ts_dt.timestamp() * 1000)
+                        rk = requests.get("https://api.binance.com/api/v3/klines",
+                                          params={"symbol": COINS[symbol], "interval": "1h",
+                                                  "startTime": ts_ms, "limit": 1},
+                                          timeout=(3, 10))
+                        if rk.ok and rk.json():
+                            actual = float(rk.json()[0][4])
+                            print(f"[Accuracy] {symbol} using exact candle close at {target_ts}", flush=True)
+                    except Exception as e:
+                        print(f"[Accuracy] {symbol} candle fetch failed: {e}, falling back to ticker", flush=True)
+
+                # Fallback to live ticker
+                if actual is None:
+                    r = requests.get("https://api.binance.com/api/v3/ticker/price",
+                                     params={"symbol": COINS[symbol]}, timeout=(3, 10))
+                    if r.ok:
+                        actual = float(r.json()["price"])
+
+                if actual is not None:
 
                     # Kronos direction accuracy
                     correct = 1 if (upside_prob >= 50 and actual > entry_price) or \
@@ -877,54 +905,24 @@ def circuit_breaker_check(symbol):
 # ── Position Sizing (advisory only — never a command) ─────────────────────────
 def compute_position_size(upside_prob, confidence, regime, last_price, p10, p90, capital=10000):
     """
-    Advisory position sizing using simplified Kelly criterion.
-    This is DISPLAY ONLY — never a trade command.
-    Capital default = 10000 (adjust in UI per your actual capital).
+    Position sizing DISABLED — model edge not yet validated.
+    Returns advisory warning only.
     """
-    try:
-        direction = "LONG" if upside_prob >= 50 else "SHORT"
+    direction = "LONG" if upside_prob >= 50 else "SHORT"
+    stop      = p10 if direction == "LONG" else p90
+    target    = p90 if direction == "LONG" else p10
 
-        # Win probability — use upside_prob directly (not "edge" which was wrong)
-        p = upside_prob / 100.0 if direction == "LONG" else (1.0 - upside_prob / 100.0)
-        p = max(0.01, min(0.99, p))
-
-        regime_mult = {"Trending": 1.0, "Weak Trend": 0.6, "Choppy": 0.0}.get(regime, 0.5)
-        conf_mult   = max(0.1, confidence / 100.0)
-
-        # Direction-aware win/loss distances
-        if direction == "LONG":
-            avg_win  = abs(p90 - last_price) / last_price if last_price > 0 else 0.05
-            avg_loss = abs(last_price - p10) / last_price if last_price > 0 else 0.05
-        else:  # SHORT: win = price falls to P10, loss = price rises to P90
-            avg_win  = abs(last_price - p10) / last_price if last_price > 0 else 0.05
-            avg_loss = abs(p90 - last_price) / last_price if last_price > 0 else 0.05
-        avg_loss = max(avg_loss, 0.001)
-
-        # Kelly criterion: f = (p * avg_win - (1-p) * avg_loss) / avg_win
-        # Algebraically equivalent to f = (p * b - q) / b where b = avg_win/avg_loss
-        kelly = (p * avg_win - (1 - p) * avg_loss) / (avg_win + 1e-10)
-        kelly = max(0.0, min(kelly, 0.25))  # cap at quarter-Kelly
-
-        size     = kelly * regime_mult * conf_mult
-        size     = min(size, 0.10)  # hard cap: never more than 10% of capital
-
-        stop      = p10 if direction == "LONG" else p90
-        risk_dist = abs(last_price - stop)
-        target    = last_price + (1.5 * risk_dist) if direction == "LONG" else last_price - (1.5 * risk_dist)
-        risk_pct  = size * (risk_dist / last_price) if last_price > 0 else 0
-
-        return {
-            "direction":       direction,
-            "size_pct":        round(size * 100, 2),
-            "stop_loss":       round(stop, 4),
-            "take_profit":     round(target, 4),
-            "risk_pct":        round(risk_pct * 100, 2),
-            "max_position_usd": round(capital * size, 2),
-            "capital_assumed": capital,
-        }
-    except Exception as e:
-        print(f"[PositionSize] Failed: {e}", flush=True)
-        return None
+    return {
+        "direction":        direction,
+        "size_pct":         0,
+        "stop_loss":        round(float(stop), 4) if stop else 0,
+        "take_profit":      round(float(target), 4) if target else 0,
+        "risk_pct":         0,
+        "max_position_usd": 0,
+        "capital_assumed":  capital,
+        "disabled":         True,
+        "reason":           "NO POSITION SIZE — model edge not validated. Do not risk real capital.",
+    }
 
 
 # ── Signal interpretation ──────────────────────────────────────────────────────
@@ -1476,4 +1474,4 @@ def paper_pnl():
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 10000))
-    app.run(host="0.0.0.0", port=port, debug=False, threaded=True)
+    app.run(host="127.0.0.1", port=port, debug=False, threaded=True)

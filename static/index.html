@@ -534,6 +534,12 @@ var timerStartedAt = null;
 var priceFrame = '24h';
 var lastPrice = 0;
 
+function escapeHtml(value) {
+  var div = document.createElement('div');
+  div.textContent = value == null ? '' : String(value);
+  return div.innerHTML;
+}
+
 function fmt(v) {
   var dec = v < 1 ? 6 : v < 100 ? 4 : 2;
   return '$' + v.toLocaleString('en-US', {minimumFractionDigits:2, maximumFractionDigits:dec});
@@ -783,7 +789,14 @@ function showResults(d) {
   var tradeSignalEl = document.getElementById('tradeSignal');
   var tradeReasonEl = document.getElementById('tradeReason');
 
-  if (sig === 'CIRCUIT_BROKEN') {
+  if (sig === 'RESEARCH_ONLY' || d.probability_status === 'uncalibrated_research_only') {
+    tradeCard.className = 'trade-card-none';
+    tradeCard.style.border = '2px solid var(--orange)';
+    tradeSignalEl.textContent = 'RESEARCH ONLY';
+    tradeSignalEl.style.color = 'var(--orange)';
+    tradeReasonEl.textContent = 'Candidate signals are being measured for net returns. No real-money instruction or position size.';
+    tradeReasonEl.style.color = 'var(--orange)';
+  } else if (sig === 'CIRCUIT_BROKEN') {
     tradeCard.className = 'trade-card-none';
     tradeCard.style.border = '2px solid var(--red)';
     tradeSignalEl.textContent = 'CIRCUIT BROKEN';
@@ -808,7 +821,9 @@ function showResults(d) {
 
   // Position sizing (advisory) — uses saved capital from localStorage
   var psCard = document.getElementById('positionCard');
-  if (d.position_size && psCard) {
+  if (psCard && !d.position_size) {
+    psCard.classList.add('hidden');
+  } else if (d.position_size && psCard) {
     var ps = d.position_size;
     var active = (sig === 'LONG' || sig === 'SHORT');
 
@@ -870,10 +885,15 @@ function showResults(d) {
   bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)';
 
   // Confidence
-  var conf = d.confidence || 50;
+  var conf = d.confidence;
   var confEl = document.getElementById('confidenceVal');
-  confEl.textContent = conf.toFixed(0) + '%';
-  confEl.className = 'metric-value ' + (conf >= 70 ? 'up' : conf >= 40 ? 'warn' : 'down');
+  if (typeof conf !== 'number') {
+    confEl.textContent = 'N/A';
+    confEl.className = 'metric-value warn';
+  } else {
+    confEl.textContent = conf.toFixed(0) + '%';
+    confEl.className = 'metric-value ' + (conf >= 70 ? 'up' : conf >= 40 ? 'warn' : 'down');
+  }
 
   // Historical accuracy
   if (d.accuracy && d.accuracy.total > 0) {
@@ -1314,6 +1334,7 @@ function loadAccuracy() {
       var byConf = data.by_confidence || {};
       var baselines = data.baselines || {};
       var bandStats = data.band_stats || {};
+      var strategy = data.strategy || {};
       // Only count active coins in all stats
       var activeKeys = Object.keys(byCoin).filter(function(k){ return COINS.indexOf(k) >= 0; });
       var keys = activeKeys;
@@ -1332,8 +1353,23 @@ function loadAccuracy() {
         '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">Overall Kronos Accuracy</div>' +
         '<div style="font-size:36px;font-weight:800;color:' + overallColor + '">' + overallPct + '%</div>' +
         '<div style="font-size:12px;color:var(--muted2);margin-top:4px">' + correctAll + ' correct out of ' + totalAll + ' predictions</div>' +
-        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Random chance = 50% . Good model >= 55%</div>' +
+        '<div style="font-size:11px;color:var(--muted);margin-top:6px">Direction alone is not profitability. See net strategy returns below.</div>' +
       '</div>';
+
+      var noData = strategy.total === undefined || strategy.total === 0;
+      var net = noData ? '—' : (strategy.avg_net_return_pct >= 0 ? '+' : '') + strategy.avg_net_return_pct + '%';
+      var netCol = noData ? 'var(--muted2)' : strategy.avg_net_return_pct > 0 ? 'var(--green)' : 'var(--red)';
+      html += '<div style="background:var(--card2);border:2px solid ' + (strategy.validated ? 'var(--green)' : 'var(--orange)') + ';border-radius:12px;padding:14px;margin-bottom:12px">' +
+        '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:8px">Cost-aware strategy results</div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">' +
+          '<div><div style="font-size:22px;font-weight:800;color:' + netCol + '">' + net + '</div><div style="font-size:10px;color:var(--muted2)">Avg net return / candidate</div></div>' +
+          '<div><div style="font-size:22px;font-weight:800">' + (noData ? '—' : strategy.total) + '</div><div style="font-size:10px;color:var(--muted2)">Non-overlapping outcomes</div></div>' +
+          '<div><div style="font-size:16px;font-weight:700">' + (noData ? '—' : strategy.avg_abs_move_pct + '%') + '</div><div style="font-size:10px;color:var(--muted2)">Avg actual move</div></div>' +
+          '<div><div style="font-size:16px;font-weight:700">' + (noData || strategy.profit_factor === null ? '—' : strategy.profit_factor) + '</div><div style="font-size:10px;color:var(--muted2)">Profit factor</div></div>' +
+        '</div>' +
+        '<div style="font-size:11px;color:' + (strategy.validated ? 'var(--green)' : 'var(--orange)') + ';margin-top:10px">' +
+          (strategy.validated ? 'Research validation threshold met; execution is still intentionally unavailable.' : 'Research only: requires 200+ non-overlapping, cost-aware outcomes with positive net return.') +
+        '</div></div>';
 
       // Baseline comparison (#5)
       if (baselines.total > 0) {
@@ -1363,7 +1399,7 @@ function loadAccuracy() {
         html += '<div style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:1px;margin-bottom:6px">P10-P90 Band Hit Rate</div>';
         html += '<div style="font-size:28px;font-weight:800;color:' + bandCol + '">' + bandStats.pct + '%</div>';
         html += '<div style="font-size:12px;color:var(--muted2);margin-top:4px">Price landed inside forecast band ' + bandStats.hits + '/' + bandStats.total + ' times</div>';
-        html += '<div style="font-size:11px;color:var(--muted);margin-top:6px">Good calibration >= 80%</div>';
+        html += '<div style="font-size:11px;color:var(--muted);margin-top:6px">Diagnostic only; this is not a probability-calibration test.</div>';
         html += '</div>';
       }
 
@@ -1492,6 +1528,11 @@ function showTradeScore(d) {
   var card = document.getElementById('scoreCard');
   if (!card) return;
 
+  if (d.probability_status === 'uncalibrated_research_only') {
+    card.style.display = 'none';
+    return;
+  }
+
   var sig = (d.signal_context || {}).trade_signal || 'NO_TRADE';
   if (sig === 'CIRCUIT_BROKEN') { card.style.display = 'none'; return; }
   card.style.display = 'block';
@@ -1500,14 +1541,14 @@ function showTradeScore(d) {
   var total = res.total;
   var color = total >= 70 ? 'var(--green)' : total >= 50 ? 'var(--orange)' : 'var(--red)';
 
-  var label = total >= 80 ? '🟢 STRONG SIGNAL' :
-              total >= 70 ? '🟢 GOOD SIGNAL' :
+  var label = total >= 80 ? '🟢 RESEARCH CANDIDATE' :
+              total >= 70 ? '🟢 RESEARCH CANDIDATE' :
               total >= 55 ? '🟡 MODERATE' :
               total >= 35 ? '🟡 WEAK SIGNAL' : '🔴 DO NOT TRADE';
 
-  var desc  = total >= 80 ? 'Strong setup. Trade with stop loss.' :
-              total >= 70 ? 'Good setup. Reduce size by 50%.' :
-              total >= 55 ? 'Mixed signals. Minimal size only.' :
+  var desc  = total >= 80 ? 'Record this as a research candidate; do not infer a live-money edge.' :
+              total >= 70 ? 'Record this as a research candidate; do not infer a live-money edge.' :
+              total >= 55 ? 'Mixed signals. Remain out of market.' :
               total >= 35 ? 'Too many negatives. Wait.' :
                             'Choppy market or small move. Stay out.';
 
@@ -1692,7 +1733,7 @@ function loadJournal() {
               '<div style="text-align:right"><div style="font-size:18px;font-weight:800" id="livepnl-'+t.id+'">...</div><div style="font-size:10px;color:var(--muted2)">Live P&L</div></div>' +
             '</div>' +
             (t.app_signal ? '<div style="font-size:10px;color:var(--muted2);margin-bottom:6px">App: '+t.app_signal+' | Upside: '+(t.app_upside_prob||'N/A')+'% | Target: $'+(t.app_predicted_price ? t.app_predicted_price.toFixed(2) : 'N/A')+'</div>' : '') +
-            (t.notes ? '<div style="font-size:11px;color:var(--muted2);font-style:italic;margin-bottom:6px">'+t.notes+'</div>' : '') +
+            (t.notes ? '<div style="font-size:11px;color:var(--muted2);font-style:italic;margin-bottom:6px">'+escapeHtml(t.notes)+'</div>' : '') +
             '<div style="display:flex;gap:6px">' +
               '<button onclick="openCloseModal('+t.id+')" style="flex:1;padding:8px;background:var(--green);border:none;border-radius:8px;color:white;font-weight:700;cursor:pointer;font-size:12px">Close Trade</button>' +
               '<button onclick="deleteTrade('+t.id+')" style="padding:8px 12px;background:var(--card);border:1px solid var(--border);border-radius:8px;color:var(--red);cursor:pointer;font-size:12px">Delete</button>' +

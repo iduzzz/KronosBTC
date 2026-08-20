@@ -1525,6 +1525,40 @@ def get_research_model_comparison():
     return comparison
 
 
+def get_prediction_audit(symbol, limit=8):
+    """Return the raw, human-checkable facts behind the direction counters."""
+    try:
+        with sqlite3.connect(DB_FILE) as conn:
+            rows = conn.execute("""
+                SELECT predicted_at, target_at, entry_price, upside_prob, candidate_signal,
+                       actual_price, direction_correct, net_return_pct, actual_move_pct
+                FROM accuracy
+                WHERE symbol=? AND target_at IS NOT NULL
+                ORDER BY predicted_at DESC LIMIT ?
+            """, (symbol, limit)).fetchall()
+        audit = []
+        for predicted_at, target_at, entry, upside, candidate, actual, correct, net, move in rows:
+            endpoint = "UP" if upside >= 50 else "DOWN"
+            settled = actual is not None and correct is not None
+            audit.append({
+                "predicted_at": predicted_at,
+                "target_at": target_at,
+                "entry_price": entry,
+                "endpoint_forecast": endpoint,
+                "sampled_upside_pct": upside,
+                "candidate": candidate or "NOT_RECORDED",
+                "actual_price": actual,
+                "actual_move_pct": move,
+                "endpoint_result": "PENDING" if not settled else ("CORRECT" if correct else "WRONG"),
+                "candidate_net_return_pct": net,
+            })
+        return {"symbol": symbol, "rows": audit,
+                "note": "Endpoint result means only whether the exact 24-hour closing direction matched. It is not trading profitability."}
+    except Exception as e:
+        print(f"[Prediction audit] failed: {e}", flush=True)
+        return {"symbol": symbol, "rows": [], "note": "Prediction audit is unavailable."}
+
+
 def log_paper_trade(symbol, result):
     if not PAPER_TRADING_ENABLED:
         return
@@ -1895,6 +1929,13 @@ def accuracy_route():
 @app.route("/research-comparison")
 def research_comparison_route():
     return jsonify(get_research_model_comparison())
+
+@app.route("/prediction-audit/<symbol>")
+def prediction_audit_route(symbol):
+    symbol = symbol.upper()
+    if symbol not in COINS:
+        return jsonify({"error": f"Unknown symbol {symbol}"}), 400
+    return jsonify(get_prediction_audit(symbol))
 
 @app.route("/paper_pnl")
 def paper_pnl():

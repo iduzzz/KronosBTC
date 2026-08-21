@@ -272,7 +272,7 @@ canvas{width:100%!important;height:100%!important}
     <div class="computing-card">
       <div class="computing-icon">🔮</div>
       <div class="computing-title" id="notStartedTitle">No Prediction Yet</div>
-      <div class="computing-sub">Tap below to start Kronos-base prediction.</div>
+      <div class="computing-sub" id="notStartedText">Tap below to start Kronos-base prediction.</div>
       <br>
       <button class="btn-predict" id="btnStart" onclick="startPrediction()">Run Kronos Prediction</button>
     </div>
@@ -798,6 +798,12 @@ function startPrediction() {
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (btn) { btn.textContent = 'Run Kronos Prediction'; btn.disabled = false; }
+      if (d.status === 'cooldown') {
+        document.getElementById('notStarted').classList.remove('hidden');
+        document.getElementById('notStartedTitle').textContent = currentCoin + ' — Measurement Protected';
+        document.getElementById('notStartedText').textContent = d.message + ' Try again in about ' + d.remaining_minutes + ' minutes.';
+        return;
+      }
       ['computingCard','notStarted','results'].forEach(function(id) {
         document.getElementById(id).classList.add('hidden');
       });
@@ -1169,7 +1175,7 @@ function loadResearchComparison() {
       var completed = Number(data.completed_outcomes || 0);
       var needed = Number(data.evidence_needed || 200);
       var status = data.status || 'Research evidence incomplete';
-      var waiting = status.indexOf('incomplete') >= 0 || status.indexOf('No model') >= 0;
+      var waiting = status.indexOf('incomplete') >= 0 || status.indexOf('No model') >= 0 || status.indexOf('failing') >= 0;
       var statusEl = document.getElementById('researchStatus');
       statusEl.textContent = waiting ? 'Do not trade from this' : 'Research threshold only — no live trading';
       statusEl.style.color = 'var(--orange)';

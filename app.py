@@ -100,6 +100,8 @@ lookback_lock  = threading.Lock()
 tournament_lock = threading.Lock()
 tournament_state = {"running": False, "stage": "not_started", "message": "Historical research has not been downloaded yet.",
                     "symbol": None, "downloaded": 0, "total": 0, "updated_at": None, "error": None}
+experimental_lock = threading.Lock()
+experimental_state = {"running": False, "message": "No experimental market check has been recorded yet.", "error": None}
 
 
 def _request_with_retry(url, *, params=None, headers=None, timeout=(3, 12), retries=2):
@@ -886,6 +888,12 @@ def init_tournament_db():
             run_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, completed_at TEXT,
             config_json TEXT NOT NULL, status TEXT NOT NULL, error TEXT
         )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS experimental_observations (
+            symbol TEXT NOT NULL, observed_at TEXT NOT NULL, target_at TEXT NOT NULL,
+            entry_price REAL NOT NULL, alignment_score REAL NOT NULL, bias TEXT NOT NULL,
+            components_json TEXT NOT NULL, actual_price REAL, direction_correct INTEGER,
+            PRIMARY KEY (symbol, target_at)
+        )""")
 
 
 def _tournament_update(**fields):
@@ -1177,6 +1185,83 @@ def get_tournament_summary():
     except Exception as exc:
         return {"state": {"running": False, "stage": "error", "message": "Tournament status unavailable.", "error": str(exc)}, "data": [], "methods": [], "evidence_by_coin": {}, "latest_run": None,
                 "plain_rule": "No historical evaluation is available."}
+
+
+def _experimental_market_observation(symbol):
+    """A transparent, uncalibrated market-state measurement; never an order signal."""
+    df = fetch_candles(symbol, "1h", 260)
+    close = df["close"].to_numpy(dtype=float)
+    volume = df["volume"].to_numpy(dtype=float)
+    ema50 = pd.Series(close).ewm(span=50, adjust=False).mean().iloc[-1]
+    ema200 = pd.Series(close).ewm(span=200, adjust=False).mean().iloc[-1]
+    momentum_24 = (close[-1] / close[-25] - 1) * 100
+    volume_ratio = volume[-1] / max(float(pd.Series(volume).rolling(20).mean().iloc[-1]), 1e-12)
+    ind = compute_indicators(df)
+    bull = bear = 0
+    ingredients = []
+    if ema50 > ema200: bull += 25; ingredients.append("longer trend up")
+    else: bear += 25; ingredients.append("longer trend down")
+    if close[-1] > ema50: bull += 15; ingredients.append("price above EMA50")
+    else: bear += 15; ingredients.append("price below EMA50")
+    if momentum_24 >= 1: bull += 15; ingredients.append("24h momentum up")
+    elif momentum_24 <= -1: bear += 15; ingredients.append("24h momentum down")
+    if ind["macd_hist"] > 0: bull += 15; ingredients.append("MACD positive")
+    elif ind["macd_hist"] < 0: bear += 15; ingredients.append("MACD negative")
+    if ind["adx"] >= 25: ingredients.append("trend strength present")
+    else: bull = max(0, bull - 10); bear = max(0, bear - 10); ingredients.append("weak/choppy trend")
+    if volume_ratio >= 1.0: ingredients.append("normal-or-higher volume")
+    else: bull = max(0, bull - 5); bear = max(0, bear - 5); ingredients.append("low volume")
+    score = round(max(0, min(100, 50 + bull - bear)), 1)
+    bias = "UPSIDE OBSERVATION" if score >= 60 else "DOWNSIDE OBSERVATION" if score <= 40 else "MIXED OBSERVATION"
+    target = (pd.Timestamp(df["timestamps"].iloc[-1]) + pd.Timedelta(hours=24)).isoformat()
+    return {"symbol": symbol, "observed_at": datetime.now(timezone.utc).isoformat(), "target_at": target,
+            "entry_price": float(close[-1]), "alignment_score": score, "bias": bias,
+            "components": ingredients}
+
+
+def run_experimental_checks():
+    try:
+        init_tournament_db()
+        with experimental_lock: experimental_state.update({"running": True, "error": None, "message": "Recording test-only market observations…"})
+        saved = 0
+        for symbol in COINS:
+            with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+                latest = conn.execute("SELECT observed_at FROM experimental_observations WHERE symbol=? ORDER BY observed_at DESC LIMIT 1", (symbol,)).fetchone()
+            if latest and (datetime.now(timezone.utc) - _as_utc(latest[0]).to_pydatetime()).total_seconds() < 24 * 3600:
+                continue
+            observation = _experimental_market_observation(symbol)
+            with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+                exists = conn.execute("SELECT 1 FROM experimental_observations WHERE symbol=? AND target_at=?", (symbol, observation["target_at"])).fetchone()
+                if not exists:
+                    conn.execute("""INSERT INTO experimental_observations
+                      (symbol, observed_at, target_at, entry_price, alignment_score, bias, components_json)
+                      VALUES (?, ?, ?, ?, ?, ?, ?)""", (symbol, observation["observed_at"], observation["target_at"], observation["entry_price"], observation["alignment_score"], observation["bias"], json.dumps(observation["components"])))
+                    saved += 1
+        with experimental_lock: experimental_state.update({"running": False, "message": f"Saved {saved} new 24-hour test observations. They are not trade instructions."})
+    except Exception as exc:
+        with experimental_lock: experimental_state.update({"running": False, "error": str(exc)[:500], "message": "Experimental check failed; no observation was saved."})
+
+
+def get_experimental_status():
+    try:
+        init_tournament_db()
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            pending = conn.execute("SELECT symbol, target_at, entry_price, alignment_score FROM experimental_observations WHERE actual_price IS NULL").fetchall()
+        for symbol, target_at, entry, score in pending:
+            actual = fetch_exact_hourly_close(symbol, target_at)
+            if actual is not None:
+                correct = int((score >= 50 and actual > entry) or (score < 50 and actual <= entry))
+                with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+                    conn.execute("UPDATE experimental_observations SET actual_price=?, direction_correct=? WHERE symbol=? AND target_at=?", (actual, correct, symbol, target_at))
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            rows = conn.execute("SELECT symbol, observed_at, target_at, alignment_score, bias, components_json FROM experimental_observations ORDER BY observed_at DESC").fetchall()
+        latest = {}
+        for symbol, observed, target, score, bias, components in rows:
+            if symbol not in latest: latest[symbol] = {"observed_at": observed, "target_at": target, "score": score, "bias": bias, "components": json.loads(components)}
+        with experimental_lock: state = dict(experimental_state)
+        return {"state": state, "by_coin": latest, "note": "Experimental Market Score is an uncalibrated test measurement, not a probability of profit or a trading instruction."}
+    except Exception as exc:
+        return {"state": {"running": False, "message": "Experimental status unavailable.", "error": str(exc)}, "by_coin": {}, "note": "Unavailable."}
 
 
 # ── Find safe lookback ─────────────────────────────────────────────────────────
@@ -2355,6 +2440,19 @@ def tournament_evaluate_route():
         tournament_state["running"] = True
     threading.Thread(target=evaluate_tournament_history, daemon=True).start()
     return jsonify({"status": "started", "message": "Evaluating fixed rules without live-trading output."})
+
+@app.route("/experimental/status")
+def experimental_status_route():
+    return jsonify(get_experimental_status())
+
+@app.route("/experimental/run-all", methods=["POST"])
+def experimental_run_all_route():
+    with experimental_lock:
+        if experimental_state["running"]:
+            return jsonify({"status": "already_running", "message": experimental_state["message"]}), 409
+        experimental_state["running"] = True
+    threading.Thread(target=run_experimental_checks, daemon=True).start()
+    return jsonify({"status": "started", "message": "Recording test-only market observations for all coins."})
 
 @app.route("/prediction-audit/<symbol>")
 def prediction_audit_route(symbol):

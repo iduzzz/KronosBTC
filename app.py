@@ -1255,11 +1255,20 @@ def get_experimental_status():
                     conn.execute("UPDATE experimental_observations SET actual_price=?, direction_correct=? WHERE symbol=? AND target_at=?", (actual, correct, symbol, target_at))
         with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
             rows = conn.execute("SELECT symbol, observed_at, target_at, alignment_score, bias, components_json FROM experimental_observations ORDER BY observed_at DESC").fetchall()
+            stats_rows = conn.execute("""SELECT symbol, COUNT(*),
+                SUM(CASE WHEN actual_price IS NOT NULL THEN 1 ELSE 0 END),
+                SUM(CASE WHEN direction_correct=1 THEN 1 ELSE 0 END)
+                FROM experimental_observations GROUP BY symbol""").fetchall()
         latest = {}
         for symbol, observed, target, score, bias, components in rows:
             if symbol not in latest: latest[symbol] = {"observed_at": observed, "target_at": target, "score": score, "bias": bias, "components": json.loads(components)}
         with experimental_lock: state = dict(experimental_state)
-        return {"state": state, "by_coin": latest, "note": "Experimental Market Score is an uncalibrated test measurement, not a probability of profit or a trading instruction."}
+        stats = {symbol: {"recorded": total, "settled": settled or 0, "correct": correct or 0,
+                          "direction_match_pct": round((correct or 0) / settled * 100, 1) if settled else None}
+                 for symbol, total, settled, correct in stats_rows}
+        return {"state": state, "by_coin": latest, "stats_by_coin": stats,
+                "minimum_settled_for_calibration": 50,
+                "note": "Input Alignment is a prototype data collector, not a probability of profit or a trading instruction."}
     except Exception as exc:
         return {"state": {"running": False, "message": "Experimental status unavailable.", "error": str(exc)}, "by_coin": {}, "note": "Unavailable."}
 

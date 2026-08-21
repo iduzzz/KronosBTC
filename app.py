@@ -1132,14 +1132,28 @@ def get_tournament_summary():
         evidence_by_coin = {}
         for (split, symbol, rule), rows in grouped.items():
             metric = {"split": split, "symbol": symbol, "rule": rule, **_tournament_result_metrics(rows)}
-            metric["validated"] = (
-                split == "out_of_sample" and rule != "no_trade" and
-                metric["periods"] >= TOURNAMENT_MIN_OUT_OF_SAMPLE_PERIODS and
-                metric["traded"] >= TOURNAMENT_MIN_OUT_OF_SAMPLE_TRADES and
-                metric["lower_net_return_bound_pct"] is not None and
-                metric["lower_net_return_bound_pct"] > 0 and
-                metric["max_drawdown_pct"] >= TOURNAMENT_MAX_DRAWDOWN_PCT
-            )
+            failures = []
+            if rule == "no_trade":
+                metric.update({"validated": False, "evidence_score": None, "simple_status": "REFERENCE — DOES NOTHING",
+                               "simple_reasons": ["This is the zero-risk benchmark, not a trading rule."]})
+                methods.append(metric)
+                continue
+            if split != "out_of_sample":
+                failures.append("Only the later locked period can qualify a rule.")
+            if metric["periods"] < TOURNAMENT_MIN_OUT_OF_SAMPLE_PERIODS:
+                failures.append(f"Too little history ({metric['periods']}/{TOURNAMENT_MIN_OUT_OF_SAMPLE_PERIODS} periods).")
+            if metric["traded"] < TOURNAMENT_MIN_OUT_OF_SAMPLE_TRADES:
+                failures.append(f"Too few trades ({metric['traded']}/{TOURNAMENT_MIN_OUT_OF_SAMPLE_TRADES}).")
+            if metric["lower_net_return_bound_pct"] is None or metric["lower_net_return_bound_pct"] <= 0:
+                failures.append("Cautious after-cost result is not positive.")
+            if metric["max_drawdown_pct"] < TOURNAMENT_MAX_DRAWDOWN_PCT:
+                failures.append(f"Historical drawdown exceeded {abs(TOURNAMENT_MAX_DRAWDOWN_PCT):.0f}%.")
+            metric["validated"] = not failures
+            metric["evidence_score"] = 0 if failures else min(100, round(
+                60 + min(25, metric["lower_net_return_bound_pct"] * 10) +
+                min(15, (metric["win_rate_pct"] or 50) - 50)))
+            metric["simple_status"] = "HISTORICALLY ELIGIBLE" if metric["validated"] else "NO TRADE"
+            metric["simple_reasons"] = failures if failures else ["Passed the historical evidence gate; a separate live setup check is still required."]
             methods.append(metric)
         for symbol in COINS:
             candidates = [m for m in methods if m["split"] == "out_of_sample" and m["symbol"] == symbol and m["validated"]]

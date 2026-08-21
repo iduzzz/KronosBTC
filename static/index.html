@@ -808,7 +808,7 @@ function loadExperimentalStatus() {
     document.getElementById('experimentalBias').textContent = item ? item.bias + ' — unproven test observation' : 'Record a test observation first.';
     var needed = data.minimum_settled_for_calibration || 50;
     document.getElementById('experimentalMeasurement').textContent = stats.settled
-      ? stats.correct + ' direction matches out of ' + stats.settled + ' settled observations (' + stats.direction_match_pct + '%). Calibration needs ' + needed + ' settled observations.'
+      ? stats.correct + ' direction matches out of ' + stats.settled + ' settled observations (' + stats.direction_match_pct + '%) · avg test net result ' + (Number(stats.avg_net_return_pct) >= 0 ? '+' : '') + Number(stats.avg_net_return_pct).toFixed(3) + '%. Calibration needs ' + needed + ' settled observations.'
       : (stats.recorded || 0) + ' recorded; 0 settled. The first exact 24-hour outcome is still pending.';
     document.getElementById('experimentalIngredients').textContent = item ? (item.components || []).join(' · ') : '—';
     document.getElementById('experimentalRun').disabled = !!state.running;

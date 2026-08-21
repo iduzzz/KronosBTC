@@ -60,6 +60,11 @@ SLIPPAGE_PCT = float(os.environ.get("KRONOS_SLIPPAGE_PCT", "0.05"))
 ROUND_TRIP_COST_PCT = 2 * (TAKER_FEE_PCT + SLIPPAGE_PCT)
 FUNDING_INTERVALS_PER_HORIZON = PRED_LEN / 8
 MIN_VALIDATION_OUTCOMES = 200
+# The live research evidence currently shows a negative return for the Kronos
+# heuristic.  Do not turn raw sampled paths into LONG/SHORT candidates while
+# that is true.  This is deliberately not an environment switch: enabling it
+# accidentally would recreate the misleading behaviour this safeguard removes.
+KRONOS_CANDIDATE_RULE_ENABLED = False
 
 COINS = {
     "ZEC": "ZECUSDT", "BTC": "BTCUSDT", "TAO": "TAOUSDT", "ETH": "ETHUSDT",
@@ -121,6 +126,29 @@ def _json_safe(value):
     if isinstance(value, (list, tuple)):
         return [_json_safe(v) for v in value]
     return value
+
+
+def _apply_model_safety(result):
+    """Prevent an older cached forecast from presenting a live trade signal.
+
+    We retain the raw forecast and its timestamp for audit, but the display is
+    always safety-gated while the candidate rule remains disabled.
+    """
+    if not isinstance(result, dict) or KRONOS_CANDIDATE_RULE_ENABLED:
+        return result
+    context = result.setdefault("signal_context", {})
+    context.update({
+        "candidate_signal": "MODEL_DISABLED",
+        "trade_signal": "MODEL_DISABLED",
+        "context": "Model output is disabled as a trading signal. Indicators are market context only.",
+        "circuit_msg": "Model candidate disabled after negative measured results; no trading instruction is produced.",
+        "confirmations": [],
+        "warnings": ["Kronos candidate rule disabled: negative measured returns in the audit."],
+        "n_confirm": 0,
+        "n_warn": 1,
+    })
+    result["probability_status"] = "model_disabled_negative_research_results"
+    return result
 
 
 # ── SQLite ─────────────────────────────────────────────────────────────────────
@@ -409,7 +437,7 @@ def load_cache_from_disk():
             rows = conn.execute("SELECT symbol, data FROM predictions").fetchall()
         for sym, data in rows:
             try:
-                cache[sym] = json.loads(data)
+                cache[sym] = _apply_model_safety(json.loads(data))
             except Exception:
                 pass
         if cache:
@@ -1519,8 +1547,8 @@ def _research_model_comparison_uncached():
             "cost_pct": ROUND_TRIP_COST_PCT,
             "same_rules_note": "Each available method uses the same exact 24-hour outcome, fee/slippage estimate, and non-overlap rule.",
             "models": [
-                {"key": "kronos", "name": "Kronos candidate rule", "state": "collecting",
-                 "plain_description": "Current research candidate rule; it trades only when its stored conditions were met.", **kronos},
+                {"key": "kronos", "name": "Archived Kronos candidate", "state": "disabled",
+                 "plain_description": "Disabled for new forecasts because its measured candidate returns are negative. The historical record stays visible for audit.", **kronos},
                 {"key": "momentum", "name": "Simple momentum baseline", "state": "available",
                  "plain_description": "A simple check: follow the previous 24-hour direction. It is the benchmark Kronos must beat.", **momentum},
                 {"key": "carry", "name": "Funding/carry baseline", "state": "available",
@@ -1638,18 +1666,22 @@ def compute_position_size(*_args, **_kwargs):
 
 
 def interpret_signals(upside_prob, ind, fear_greed, funding, etf_flows, onchain, btc_dominance, symbol):
-    # This preserves the existing heuristic as a research candidate only.
-    candidate = "NO_TRADE"
+    # Raw sampled paths are not calibrated probabilities.  The prior heuristic
+    # also has negative measured returns, so it is disabled rather than silently
+    # producing new LONG/SHORT candidates.
+    candidate = "MODEL_DISABLED"
     adx, fund = ind.get("adx", 0), funding.get("rate")
-    if fund is not None and adx >= 20:
+    if KRONOS_CANDIDATE_RULE_ENABLED and fund is not None and adx >= 20:
         if upside_prob > 60 and ind.get("macd_hist", 0) > 0 and ind.get("rsi", 50) < 70:
             candidate = "LONG"
         elif upside_prob < 40 and ind.get("macd_hist", 0) < 0 and ind.get("rsi", 50) > 30:
             candidate = "SHORT"
-    return {"confirmations": [], "warnings": [], "context": "Research candidate; not a trade instruction",
+    return {"confirmations": [],
+            "warnings": ["Kronos candidate rule disabled: negative measured returns in the audit."],
+            "context": "Model output is disabled as a trading signal. Indicators below are market context only.",
             "n_confirm": 0, "n_warn": 0, "candidate_signal": candidate,
-            "trade_signal": candidate if PAPER_TRADING_ENABLED else "RESEARCH_ONLY",
-            "circuit_msg": "Signals remain research-only until independent net-return validation.",
+            "trade_signal": "MODEL_DISABLED",
+            "circuit_msg": "Model candidate disabled after negative measured results; no trading instruction is produced.",
             "regime": ind.get("regime", "Unknown"), "adx": adx}
 
 

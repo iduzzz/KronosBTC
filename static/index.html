@@ -245,7 +245,7 @@ canvas{width:100%!important;height:100%!important}
   </div>
   <div style="display:flex;align-items:center;gap:10px">
     <div class="live-badge"><div class="live-dot"></div>LIVE</div>
-    <button onclick="startPrediction()" style="background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:10px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;-webkit-tap-highlight-color:transparent">Run</button>
+    <button onclick="startPrediction()" style="display:none">Run</button>
   </div>
 </div>
 
@@ -284,7 +284,7 @@ canvas{width:100%!important;height:100%!important}
       <span class="badge badge-orange hidden" id="refreshBadge"><div class="spinner"></div> Refreshing...</span>
     </div>
 
-    <section class="research-panel" aria-label="Research model comparison">
+    <section class="research-panel" aria-label="Research model comparison" style="display:none">
       <div class="research-head">
         <div>
           <div class="research-title">🔬 Fair Model Comparison</div>
@@ -314,7 +314,7 @@ canvas{width:100%!important;height:100%!important}
         <button class="btn-predict" id="evaluateHistoryBtn" onclick="startTournamentEvaluation()" style="padding:8px 12px;font-size:11px;background:linear-gradient(135deg,#0f766e,#2563eb)">2. Run Fixed Historical Tests</button>
       </div>
       <div style="font-size:10px;color:var(--muted2);line-height:1.6;margin-bottom:10px">
-        First download data. The second button tests pre-defined no-trade and momentum rules with a 24-hour hold, fees, gaps excluded, and a locked later-period check. It does not create a live signal.
+        The test compares pre-defined no-trade, momentum, trend, pullback, and breakout rules with a 24-hour hold, fees, gaps excluded, and a locked later-period check. It does not create a live signal unless a rule passes every evidence gate.
       </div>
       <div class="research-grid" style="margin-bottom:10px">
         <div class="research-tile" style="border:2px solid var(--orange)">
@@ -331,14 +331,14 @@ canvas{width:100%!important;height:100%!important}
       <div class="research-models" id="tournamentMethods"></div>
     </section>
 
-    <section class="audit-panel" aria-label="Prediction audit">
+    <section class="audit-panel" aria-label="Prediction audit" style="display:none">
       <div class="audit-title">🔎 Prediction Audit — <span id="auditCoin">ZEC</span></div>
       <div class="audit-note" id="auditNote">Loading the saved forecast facts…</div>
       <div class="audit-wrap" id="auditRows"></div>
     </section>
 
     <!-- DASHBOARD GRID -->
-    <div class="dash-grid">
+    <div class="dash-grid" style="display:none">
 
       <!-- 1. Model safety status -->
       <div class="dash-tile dash-wide" id="tradeCard" onclick="toggleDetail('detailSignal')">
@@ -579,7 +579,7 @@ canvas{width:100%!important;height:100%!important}
     </div><!-- end dash-grid -->
 
     <!-- Chart & Forecast — collapsible -->
-    <div style="margin-top:8px">
+    <div style="display:none">
       <button onclick="toggleDetail('detailChart')" class="btn-predict" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);padding:10px;font-size:12px">
         📊 Show Forecast Chart &amp; Hourly Breakdown
       </button>
@@ -599,11 +599,11 @@ canvas{width:100%!important;height:100%!important}
     </div>
 
     <!-- Model info & refresh -->
-    <div class="badge-row" style="padding:6px 0;display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin-top:6px">
+    <div class="badge-row" style="display:none">
       <span class="badge badge-blue" id="deviceBadge">Kronos-base . N=100</span>
       <span class="badge badge-purple" id="gpuBadge" style="display:none">GPU Active</span>
     </div>
-    <button class="btn-predict" onclick="startPrediction()" style="background:var(--card2);color:var(--muted2);border:1px solid var(--border);margin-top:4px">Request Fresh Prediction</button>
+    <button class="btn-predict" onclick="startPrediction()" style="display:none">Request Fresh Prediction</button>
   </div>
 
 <script>
@@ -728,11 +728,11 @@ function checkStatus() {
     .then(function(d) {
       statusData = d;
       var el = document.getElementById('statusRow');
-      if (d.model_ready) {
+      if (d.model_ready || d.app_mode === 'research') {
         var dev = d.device === 'directml' ? 'Intel Arc GPU' : d.device === 'cuda' ? 'NVIDIA GPU' : 'CPU';
-        el.innerHTML = '<span>OK</span><span>Kronos-base ready . ' + dev + ' . N=' + (d.monte_carlo_n||100) + '</span>';
+        el.innerHTML = '<span>OK</span><span>Historical Research Lab ready . Live forecast signals are disabled.</span>';
         var sub = document.getElementById('headerSub');
-        if (sub) sub.textContent = 'Kronos-base . 102M . N=' + (d.monte_carlo_n||100) + ' . ' + dev + ' . Manual refresh';
+        if (sub) sub.textContent = 'Historical Research Lab . Closed hourly data . No live forecast signals';
         updateCoinButtons();
         showCoinState();
       } else if (d.model_error) {
@@ -773,24 +773,13 @@ function selectCoin(coin) {
 }
 
 function showCoinState() {
-  ['computingCard','notStarted','results'].forEach(function(id) {
+  ['computingCard','notStarted'].forEach(function(id) {
     document.getElementById(id).classList.add('hidden');
   });
-  var isRunning = statusData.running && statusData.running[currentCoin];
-  var isCached  = statusData.cached && statusData.cached.indexOf(currentCoin) >= 0;
-  if (isRunning) {
-    document.getElementById('computingCard').classList.remove('hidden');
-    document.getElementById('computingTitle').textContent = 'Computing ' + currentCoin + '...';
-    startTimer();
-    startPolling();
-  } else if (isCached) {
-    stopTimer();
-    loadCache();
-  } else {
-    stopTimer();
-    document.getElementById('notStarted').classList.remove('hidden');
-    document.getElementById('notStartedTitle').textContent = currentCoin + ' - No Prediction Yet';
-  }
+  stopTimer();
+  document.getElementById('results').classList.remove('hidden');
+  document.getElementById('updatedTime').style.display = 'none';
+  loadTournamentStatus();
 }
 
 function startPolling() {
@@ -856,9 +845,8 @@ function showResults(d) {
   });
   stopTimer();
   document.getElementById('results').classList.remove('hidden');
-  loadResearchComparison();
   loadTournamentStatus();
-  loadPredictionAudit(currentCoin);
+  return;
 
   var rb = document.getElementById('refreshBadge');
   if (d.is_running) rb.classList.remove('hidden');
@@ -1263,7 +1251,10 @@ function loadResearchComparison() {
 function tournamentRuleName(rule) {
   return rule === 'no_trade' ? 'No-trade baseline' :
          rule === 'momentum_24' ? '24h momentum baseline' :
-         rule === 'trend_momentum' ? 'Trend + momentum rule' : rule;
+         rule === 'trend_momentum' ? 'Trend + momentum rule' :
+         rule === 'ema_trend_pullback' ? 'EMA trend + pullback rule' :
+         rule === 'breakout_volume' ? '48h breakout + volume rule' :
+         rule === 'trend_momentum_low_vol' ? 'Trend + momentum + volatility rule' : rule;
 }
 
 function loadTournamentStatus() {

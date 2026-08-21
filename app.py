@@ -40,6 +40,7 @@ LOOKBACK       = 384
 PRED_LEN       = 24
 MONTE_CARLO_N  = max(1, min(int(os.environ.get("KRONOS_MONTE_CARLO_N", "100")), 1000))
 REFRESH_SECS   = 3600
+FORECAST_COOLDOWN_SECS = PRED_LEN * 3600
 NUM_WORKERS    = 1
 DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
 
@@ -1247,6 +1248,7 @@ def save_prediction(symbol, result):
             # Positive funding is paid by longs; this is an estimate recorded at entry.
             funding_cost = float(rate) * FUNDING_INTERVALS_PER_HORIZON * (1 if candidate == "LONG" else -1)
         estimated_cost = ROUND_TRIP_COST_PCT + funding_cost
+        recorded = False
         with db_lock:
             with sqlite3.connect(DB_FILE) as conn:
                 conn.execute("""
@@ -1254,22 +1256,31 @@ def save_prediction(symbol, result):
                     VALUES (?, ?, ?, NULL)
                 """, (symbol, json.dumps(result), result["updated_at"]))
                 fc = result["forecast"]
-                conn.execute("""
-                    INSERT INTO accuracy
-                    (symbol, predicted_at, target_timestamp, target_at, entry_price,
-                     predicted_price, upside_prob, raw_upside_prob,
-                     p10_at_prediction, p90_at_prediction, momentum_direction,
-                     carry_direction, candidate_signal, estimated_cost_pct, estimated_funding_cost_pct)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (symbol, result["updated_at"], target_at, target_at, result["last_price"],
-                      fc["mean_close"][-1], result["upside_prob"], result.get("raw_upside_prob"),
-                      fc["lower"][-1], fc["upper"][-1],
-                      result.get("momentum_direction"), result.get("carry_direction"),
-                      candidate, estimated_cost, funding_cost))
+                existing = conn.execute(
+                    "SELECT 1 FROM accuracy WHERE symbol=? AND target_at=? LIMIT 1",
+                    (symbol, target_at)
+                ).fetchone()
+                if existing is None:
+                    conn.execute("""
+                        INSERT INTO accuracy
+                        (symbol, predicted_at, target_timestamp, target_at, entry_price,
+                         predicted_price, upside_prob, raw_upside_prob,
+                         p10_at_prediction, p90_at_prediction, momentum_direction,
+                         carry_direction, candidate_signal, estimated_cost_pct, estimated_funding_cost_pct)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (symbol, result["updated_at"], target_at, target_at, result["last_price"],
+                          fc["mean_close"][-1], result["upside_prob"], result.get("raw_upside_prob"),
+                          fc["lower"][-1], fc["upper"][-1],
+                          result.get("momentum_direction"), result.get("carry_direction"),
+                          candidate, estimated_cost, funding_cost))
+                    recorded = True
+                else:
+                    print(f"[DB] {symbol} forecast for target {target_at} already recorded; not duplicating measurement.", flush=True)
         with cache_lock:
             cache[symbol] = result
         _invalidate_stats_cache()
-        log_paper_trade(symbol, result)
+        if recorded:
+            log_paper_trade(symbol, result)
     except Exception as e:
         print(f"[DB] Save failed: {e}", flush=True)
 
@@ -1351,9 +1362,9 @@ def _get_accuracy_stats_uncached():
     """Return descriptive accuracy plus cost-aware strategy metrics, never a claim of edge."""
     try:
         with sqlite3.connect(DB_FILE) as conn:
-            all_rows = conn.execute("""
-                SELECT symbol, COUNT(*), SUM(direction_correct)
-                FROM accuracy WHERE direction_correct IS NOT NULL AND target_at IS NOT NULL GROUP BY symbol
+            direction_rows = conn.execute("""
+                SELECT symbol, predicted_at, direction_correct
+                FROM accuracy WHERE direction_correct IS NOT NULL AND target_at IS NOT NULL
             """).fetchall()
             strategy_rows = conn.execute("""
                 SELECT symbol, predicted_at, net_return_pct, gross_return_pct, actual_move_pct
@@ -1364,7 +1375,17 @@ def _get_accuracy_stats_uncached():
                 FROM accuracy WHERE direction_correct IS NOT NULL AND target_at IS NOT NULL
             """).fetchone()
             band = conn.execute("SELECT COUNT(*), SUM(inside_band) FROM accuracy WHERE inside_band IS NOT NULL AND target_at IS NOT NULL").fetchone()
-        by_coin = {s: {"total": n, "correct": c or 0, "pct": round((c or 0) / n * 100, 1)} for s, n, c in all_rows}
+        # One 24-hour target may be requested more than once.  Show only one
+        # non-overlapping outcome per coin so the headline cannot be inflated
+        # or distorted by repeated button presses.
+        unique_direction_rows = _non_overlapping(direction_rows)
+        by_coin = {}
+        for symbol, _predicted_at, correct in unique_direction_rows:
+            entry = by_coin.setdefault(symbol, {"total": 0, "correct": 0, "pct": None})
+            entry["total"] += 1
+            entry["correct"] += int(correct or 0)
+        for entry in by_coin.values():
+            entry["pct"] = round(entry["correct"] / entry["total"] * 100, 1) if entry["total"] else None
         non_overlapping = _non_overlapping(strategy_rows)
         returns = [r[2] for r in non_overlapping]
         gross_returns = [r[3] for r in non_overlapping]
@@ -1476,10 +1497,15 @@ def _research_model_comparison_uncached():
         kronos_proven = (kronos["tested"] >= MIN_VALIDATION_OUTCOMES and
                           kronos["lower_net_return_bound_pct"] is not None and
                           kronos["lower_net_return_bound_pct"] > 0)
-        status = ("Research evidence incomplete" if not evidence_complete else
+        kronos_failing = (kronos["tested"] >= 3 and kronos["avg_net_return_pct"] is not None and
+                          kronos["avg_net_return_pct"] < 0)
+        status = ("Kronos candidate currently failing — do not use" if kronos_failing else
+                  "Research evidence incomplete" if not evidence_complete else
                   "No model validated" if not kronos_proven else
                   "Kronos research threshold met — execution remains disabled")
         explanation = (
+            "The current Kronos candidate has negative measured net returns. It is being retained only to document failure, not as a signal."
+            if kronos_failing else
             f"{completed} fair 24-hour outcomes are complete; {MIN_VALIDATION_OUTCOMES} are required "
             "before any model can pass the research gate."
             if not evidence_complete else
@@ -1770,6 +1796,19 @@ def predict(symbol):
         return jsonify({"error": f"Unknown symbol {symbol}"}), 400
     if not model_ready:
         return jsonify({"error": "Model not loaded yet."}), 503
+    with cache_lock:
+        previous = cache.get(symbol)
+    if previous and previous.get("updated_at"):
+        try:
+            age_seconds = (datetime.now(timezone.utc) - _as_utc(previous["updated_at"]).to_pydatetime()).total_seconds()
+            if age_seconds < FORECAST_COOLDOWN_SECS:
+                return jsonify({
+                    "status": "cooldown",
+                    "message": "One 24-hour forecast per coin is allowed for clean measurement.",
+                    "remaining_minutes": max(1, int((FORECAST_COOLDOWN_SECS - age_seconds) // 60)),
+                })
+        except Exception:
+            pass
     with queue_lock:
         with state_lock:
             is_running = running.get(symbol, False)

@@ -301,7 +301,7 @@ canvas{width:100%!important;height:100%!important}
       <div class="research-models" id="researchModels"><div class="research-model"><div class="research-model-name">Loading models…</div></div></div>
     </section>
 
-    <section class="research-panel" aria-label="Historical research lab" style="border-color:rgba(96,165,250,.7)">
+    <section class="research-panel" id="historicalPanel" aria-label="Historical research lab" style="border-color:rgba(96,165,250,.7)">
       <div class="research-head">
         <div>
           <div class="research-title">🧪 Historical Research Lab</div>
@@ -331,7 +331,7 @@ canvas{width:100%!important;height:100%!important}
       <div class="research-models" id="tournamentMethods"></div>
     </section>
 
-    <section class="research-panel" aria-label="Experimental market observation" style="border-color:rgba(245,158,11,.7)">
+    <section class="research-panel" id="experimentalPanel" aria-label="Experimental market observation" style="border-color:rgba(245,158,11,.7)">
       <div class="research-head"><div><div class="research-title">🧭 Experimental Market Score — <span id="experimentalCoin">ZEC</span></div><div class="research-sub" id="experimentalNote">Test-only measurement; not a probability of profit.</div></div><div class="research-status" id="experimentalStatus">NO SAMPLE</div></div>
       <div class="research-grid"><div class="research-tile"><div class="research-label">Current test score</div><div class="research-value" id="experimentalScore">— / 100</div><div class="research-detail" id="experimentalBias">No observation recorded</div></div><div class="research-tile"><div class="research-label">What the score observed</div><div class="research-detail" id="experimentalIngredients">—</div></div></div>
       <button class="btn-predict" id="experimentalRun" onclick="runExperimentalCheck()" style="padding:8px 12px;font-size:11px">Record Today’s Test Check — All Coins</button>
@@ -784,6 +784,9 @@ function showCoinState() {
     document.getElementById(id).classList.add('hidden');
   });
   stopTimer();
+  var experimentalPanel = document.getElementById('experimentalPanel');
+  var historicalPanel = document.getElementById('historicalPanel');
+  if (experimentalPanel && historicalPanel) historicalPanel.parentNode.insertBefore(experimentalPanel, historicalPanel);
   document.getElementById('results').classList.remove('hidden');
   document.getElementById('updatedTime').style.display = 'none';
   loadTournamentStatus();
@@ -791,7 +794,10 @@ function showCoinState() {
 }
 
 function loadExperimentalStatus() {
-  fetch(BASE + '/experimental/status').then(function(r){ return r.json(); }).then(function(data) {
+  fetch(BASE + '/experimental/status').then(function(r){
+    if (!r.ok) throw new Error('The running app.py does not include the Experimental Market Score endpoint.');
+    return r.json();
+  }).then(function(data) {
     var state = data.state || {}, item = (data.by_coin || {})[currentCoin];
     document.getElementById('experimentalCoin').textContent = currentCoin + '/USDT';
     document.getElementById('experimentalStatus').textContent = state.running ? 'RECORDING' : item ? 'TEST ONLY' : 'NO SAMPLE';
@@ -802,13 +808,20 @@ function loadExperimentalStatus() {
     document.getElementById('experimentalIngredients').textContent = item ? (item.components || []).join(' · ') : '—';
     document.getElementById('experimentalRun').disabled = !!state.running;
     if (state.running) setTimeout(loadExperimentalStatus, 2500);
+  }).catch(function(error) {
+    document.getElementById('experimentalStatus').textContent = 'RESTART REQUIRED';
+    document.getElementById('experimentalStatus').style.color = 'var(--orange)';
+    document.getElementById('experimentalNote').textContent = 'Copy the newest app.py, stop the old app completely, then start it again. ' + error.message;
   });
 }
 
 function runExperimentalCheck() {
   document.getElementById('experimentalStatus').textContent = 'STARTING…';
-  fetch(BASE + '/experimental/run-all', {method:'POST'}).then(function(r){ return r.json(); }).then(function(){ loadExperimentalStatus(); })
-    .catch(function(){ document.getElementById('experimentalStatus').textContent = 'UNAVAILABLE'; });
+  fetch(BASE + '/experimental/run-all', {method:'POST'}).then(function(r){
+    if (!r.ok) throw new Error('Restart the app after copying the newest app.py.');
+    return r.json();
+  }).then(function(){ loadExperimentalStatus(); })
+    .catch(function(error){ document.getElementById('experimentalStatus').textContent = 'RESTART REQUIRED'; document.getElementById('experimentalNote').textContent = error.message; });
 }
 
 function startPolling() {

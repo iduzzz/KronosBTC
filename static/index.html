@@ -310,16 +310,16 @@ canvas{width:100%!important;height:100%!important}
     <!-- DASHBOARD GRID -->
     <div class="dash-grid">
 
-      <!-- 1. Advisory Signal -->
+      <!-- 1. Model safety status -->
       <div class="dash-tile dash-wide" id="tradeCard" onclick="toggleDetail('detailSignal')">
-        <div class="dt-label">Advisory Signal</div>
+        <div class="dt-label">Model Safety Status</div>
         <div class="dt-val" id="tradeSignal" style="font-size:22px;font-weight:900">-</div>
         <div class="dt-sub" id="tradeReason"></div>
         <div class="dt-detail hidden" id="detailSignal" onclick="event.stopPropagation()">
           <div style="font-size:11px;color:var(--muted2);margin-top:8px;line-height:1.7">
-            <b>LONG</b> = Kronos &gt;60% + 2 confirms + 0 warnings<br>
-            <b>SHORT</b> = Kronos &lt;40% + 2 confirms + 0 warnings<br>
-            <b>NO TRADE</b> = Insufficient edge — wait
+            This app does not currently produce a buy, sell, long, short, or position-size instruction.<br>
+            The prior Kronos candidate is disabled because its measured net returns are negative.<br>
+            Technical indicators below describe market conditions; none is a trade instruction.
           </div>
         </div>
       </div>
@@ -352,16 +352,15 @@ canvas{width:100%!important;height:100%!important}
         </div>
       </div>
 
-      <!-- 3. Kronos Upside -->
+      <!-- 3. Raw model diagnostic -->
       <div class="dash-tile" onclick="toggleDetail('detailKronos')">
-        <div class="dt-label">Sampled Upside</div>
+        <div class="dt-label">Model Output</div>
         <div class="dt-val" id="upsideVal">-</div>
-        <div class="dt-sub">Model paths ending higher; not calibrated probability</div>
+        <div class="dt-sub">Disabled for trading; raw diagnostic only</div>
         <div class="dt-detail hidden" id="detailKronos" onclick="event.stopPropagation()">
-          <div class="bar-bg" style="margin-top:6px"><div class="bar-fill" id="upsideBar" style="width:0%"></div></div>
-          <div style="display:flex;justify-content:space-between;font-size:9px;color:var(--muted2);margin-top:2px"><span>Bearish</span><span>Bullish</span></div>
+          <div id="rawModelDiagnostic" style="font-size:10px;color:var(--muted2);margin-top:6px;line-height:1.6">Raw sampled-path output: —</div>
           <div id="accuracyBox" class="hidden" style="margin-top:6px;text-align:center">
-            <div style="font-size:10px;color:var(--muted2)">24h Endpoint Direction Only</div>
+            <div style="font-size:10px;color:var(--muted2)">Archived endpoint history (not trading accuracy)</div>
             <div style="font-size:16px;font-weight:800" id="accuracyVal">-</div>
             <div style="font-size:9px;color:var(--muted2)" id="accuracyCount">-</div>
           </div>
@@ -396,13 +395,14 @@ canvas{width:100%!important;height:100%!important}
         </div>
       </div>
 
-      <!-- 6. Price Target -->
+      <!-- 6. Raw sample mean -->
       <div class="dash-tile" onclick="toggleDetail('detailTarget')">
-        <div class="dt-label">24h Sample Mean</div>
+        <div class="dt-label">Raw 24h Sample Mean</div>
         <div class="dt-val" id="targetPrice" style="font-size:14px">-</div>
         <div class="dt-sub" id="targetChange">-</div>
         <div class="dt-detail hidden" id="detailTarget" onclick="event.stopPropagation()">
           <div style="font-size:10px;color:var(--muted2);margin-top:6px">
+            This is not a price target or trade level.<br>
             P90: <span id="tHigh" style="color:var(--green)">-</span><br>
             P10: <span id="tLow" style="color:var(--red)">-</span>
           </div>
@@ -535,9 +535,9 @@ canvas{width:100%!important;height:100%!important}
         </div>
       </div>
 
-      <!-- 16. Signal Context -->
+      <!-- 16. Context checklist -->
       <div class="dash-tile" onclick="toggleDetail('detailCtx')">
-        <div class="dt-label">Signals</div>
+        <div class="dt-label">Context Checklist</div>
         <div class="dt-val" id="ctxScore" style="font-size:18px">-</div>
         <div class="dt-sub" id="contextSummary" style="font-size:9px">-</div>
         <div class="dt-detail hidden" id="detailCtx" onclick="event.stopPropagation()">
@@ -851,7 +851,14 @@ function showResults(d) {
   var tradeSignalEl = document.getElementById('tradeSignal');
   var tradeReasonEl = document.getElementById('tradeReason');
 
-  if (sig === 'RESEARCH_ONLY' || d.probability_status === 'uncalibrated_research_only') {
+  if (sig === 'MODEL_DISABLED') {
+    tradeCard.className = 'trade-card-none';
+    tradeCard.style.border = '2px solid var(--red)';
+    tradeSignalEl.textContent = 'MODEL DISABLED';
+    tradeSignalEl.style.color = 'var(--red)';
+    tradeReasonEl.textContent = sc.circuit_msg || 'The Kronos candidate has negative measured returns. No trading signal is produced.';
+    tradeReasonEl.style.color = 'var(--red)';
+  } else if (sig === 'RESEARCH_ONLY' || d.probability_status === 'uncalibrated_research_only') {
     tradeCard.className = 'trade-card-none';
     tradeCard.style.border = '2px solid var(--orange)';
     tradeSignalEl.textContent = 'RESEARCH ONLY';
@@ -937,14 +944,17 @@ function showResults(d) {
                          regime === 'Choppy'   ? 'regime-badge-choppy' : 'regime-badge-weak';
   }
 
-  // Upside prob
+  // Raw sampled-path output is retained for audit, but deliberately does not
+  // receive bullish/bearish colouring or a directional display.
   var up = d.upside_prob;
   var uEl = document.getElementById('upsideVal');
-  uEl.textContent = up.toFixed(1) + '%';
-  uEl.className = 'metric-value ' + (up >= 60 ? 'up' : up >= 40 ? 'warn' : 'down');
-  var bar = document.getElementById('upsideBar');
-  bar.style.width = up + '%';
-  bar.style.background = up >= 60 ? 'var(--green)' : up >= 40 ? 'var(--orange)' : 'var(--red)';
+  uEl.textContent = sig === 'MODEL_DISABLED' ? 'NOT USABLE' : up.toFixed(1) + '%';
+  uEl.className = 'metric-value warn';
+  var rawDiagnostic = document.getElementById('rawModelDiagnostic');
+  if (rawDiagnostic) {
+    rawDiagnostic.textContent = 'Raw sampled-path output: ' + up.toFixed(1) +
+      '% paths ended higher. It is not calibrated and is disabled after negative measured candidate returns.';
+  }
 
   // Confidence
   var conf = d.confidence;
@@ -962,7 +972,7 @@ function showResults(d) {
     document.getElementById('accuracyBox').classList.remove('hidden');
     var accEl = document.getElementById('accuracyVal');
     accEl.textContent = d.accuracy.pct + '%';
-    accEl.style.color = d.accuracy.pct >= 55 ? 'var(--green)' : d.accuracy.pct >= 45 ? 'var(--orange)' : 'var(--red)';
+    accEl.style.color = 'var(--muted2)';
     document.getElementById('accuracyCount').textContent =
       d.accuracy.correct + ' endpoint matches out of ' + d.accuracy.total + ' settled forecasts';
   }
@@ -999,7 +1009,7 @@ function showResults(d) {
     });
   }
 
-  // Price target
+  // Raw sample mean: show it neutrally, because it is not a usable price target.
   var fc = d.forecast;
   var lastMean = fc.mean_close[fc.mean_close.length-1];
   var lastHigh = fc.upper[fc.upper.length-1];
@@ -1008,7 +1018,7 @@ function showResults(d) {
   document.getElementById('targetPrice').textContent = fmt(lastMean);
   var cEl = document.getElementById('targetChange');
   cEl.textContent = (chg >= 0 ? '+' : '') + chg.toFixed(2) + '% vs current';
-  cEl.style.color = chg >= 0 ? 'var(--green)' : 'var(--red)';
+  cEl.style.color = 'var(--muted2)';
   document.getElementById('tHigh').textContent = 'P90: ' + fmt(lastHigh);
   document.getElementById('tLow').textContent  = 'P10: ' + fmt(lastLow);
 
@@ -1234,7 +1244,7 @@ function loadPredictionAudit(symbol) {
       function price(value) { return value == null ? '—' : '$' + Number(value).toLocaleString('en-US', {maximumFractionDigits:2}); }
       function date(value) { return value ? new Date(value).toLocaleString() : '—'; }
       function net(row) {
-        if (row.candidate === 'NO_TRADE') return 'No trade recorded';
+        if (row.candidate === 'NO_TRADE' || row.candidate === 'MODEL_DISABLED') return 'No trade recorded';
         if (row.candidate_net_return_pct == null) return 'Pending';
         var value = Number(row.candidate_net_return_pct);
         return (value >= 0 ? '+' : '') + value.toFixed(3) + '%';

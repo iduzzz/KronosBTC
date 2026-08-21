@@ -332,8 +332,8 @@ canvas{width:100%!important;height:100%!important}
     </section>
 
     <section class="research-panel" id="experimentalPanel" aria-label="Experimental market observation" style="border-color:rgba(245,158,11,.7)">
-      <div class="research-head"><div><div class="research-title">🧭 Experimental Market Score — <span id="experimentalCoin">ZEC</span></div><div class="research-sub" id="experimentalNote">Test-only measurement; not a probability of profit.</div></div><div class="research-status" id="experimentalStatus">NO SAMPLE</div></div>
-      <div class="research-grid"><div class="research-tile"><div class="research-label">Current test score</div><div class="research-value" id="experimentalScore">— / 100</div><div class="research-detail" id="experimentalBias">No observation recorded</div></div><div class="research-tile"><div class="research-label">What the score observed</div><div class="research-detail" id="experimentalIngredients">—</div></div></div>
+      <div class="research-head"><div><div class="research-title">🧭 Prototype Data Collector — <span id="experimentalCoin">ZEC</span></div><div class="research-sub" id="experimentalNote">Input alignment is being measured; it is not a probability of profit.</div></div><div class="research-status" id="experimentalStatus">NO SAMPLE</div></div>
+      <div class="research-grid"><div class="research-tile"><div class="research-label">Input alignment — not a trade probability</div><div class="research-value" id="experimentalScore">— / 100</div><div class="research-detail" id="experimentalBias">No observation recorded</div></div><div class="research-tile"><div class="research-label">Measurement status</div><div class="research-detail" id="experimentalMeasurement">Need 50 settled observations before calibration can be assessed.</div></div><div class="research-tile"><div class="research-label">What the collector observed</div><div class="research-detail" id="experimentalIngredients">—</div></div></div>
       <button class="btn-predict" id="experimentalRun" onclick="runExperimentalCheck()" style="padding:8px 12px;font-size:11px">Record Today’s Test Check — All Coins</button>
       <div style="font-size:10px;color:var(--muted2);margin-top:8px">Use at most once per 24 hours. Each score is saved and later compared with the exact 24-hour close before it can be considered useful.</div>
     </section>
@@ -799,12 +799,17 @@ function loadExperimentalStatus() {
     return r.json();
   }).then(function(data) {
     var state = data.state || {}, item = (data.by_coin || {})[currentCoin];
+    var stats = (data.stats_by_coin || {})[currentCoin] || {};
     document.getElementById('experimentalCoin').textContent = currentCoin + '/USDT';
     document.getElementById('experimentalStatus').textContent = state.running ? 'RECORDING' : item ? 'TEST ONLY' : 'NO SAMPLE';
     document.getElementById('experimentalNote').textContent = data.note || state.message || '';
     document.getElementById('experimentalScore').textContent = item ? Number(item.score).toFixed(0) + ' / 100' : '— / 100';
     document.getElementById('experimentalScore').style.color = 'var(--orange)';
     document.getElementById('experimentalBias').textContent = item ? item.bias + ' — unproven test observation' : 'Record a test observation first.';
+    var needed = data.minimum_settled_for_calibration || 50;
+    document.getElementById('experimentalMeasurement').textContent = stats.settled
+      ? stats.correct + ' direction matches out of ' + stats.settled + ' settled observations (' + stats.direction_match_pct + '%). Calibration needs ' + needed + ' settled observations.'
+      : (stats.recorded || 0) + ' recorded; 0 settled. The first exact 24-hour outcome is still pending.';
     document.getElementById('experimentalIngredients').textContent = item ? (item.components || []).join(' · ') : '—';
     document.getElementById('experimentalRun').disabled = !!state.running;
     if (state.running) setTimeout(loadExperimentalStatus, 2500);

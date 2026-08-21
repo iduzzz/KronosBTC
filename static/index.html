@@ -316,6 +316,17 @@ canvas{width:100%!important;height:100%!important}
       <div style="font-size:10px;color:var(--muted2);line-height:1.6;margin-bottom:10px">
         First download data. The second button tests pre-defined no-trade and momentum rules with a 24-hour hold, fees, gaps excluded, and a locked later-period check. It does not create a live signal.
       </div>
+      <div class="research-grid" style="margin-bottom:10px">
+        <div class="research-tile" style="border:2px solid var(--orange)">
+          <div class="research-label">Trade Evidence Score — <span id="tournamentCoin">Selected coin</span></div>
+          <div class="research-value" id="tournamentScore">— / 100</div>
+          <div class="research-detail" id="tournamentAction">Historical evidence gate</div>
+        </div>
+        <div class="research-tile">
+          <div class="research-label">Why this score</div>
+          <div class="research-detail" id="tournamentReason" style="font-size:11px;line-height:1.5">Download history and run the fixed tests first.</div>
+        </div>
+      </div>
       <div class="research-models" id="tournamentData"><div class="research-model"><div class="research-model-name">No separate historical data downloaded yet.</div></div></div>
       <div class="research-models" id="tournamentMethods"></div>
     </section>
@@ -1283,15 +1294,26 @@ function loadTournamentStatus() {
           '<div class="research-model-note">' + (gap ? gap + ' time gaps found — affected windows are excluded.' : 'No hourly gaps found.') + '</div></div>';
       }).join('') : '<div class="research-model"><div class="research-model-name">No separate historical data downloaded yet.</div></div>';
 
-      var oos = (data.methods || []).filter(function(row) { return row.split === 'out_of_sample'; });
+      var evidence = (data.evidence_by_coin || {})[currentCoin] || {};
+      document.getElementById('tournamentCoin').textContent = currentCoin + '/USDT';
+      document.getElementById('tournamentScore').textContent = typeof evidence.score === 'number' ? evidence.score + ' / 100' : '— / 100';
+      document.getElementById('tournamentScore').style.color = evidence.eligible ? 'var(--green)' : 'var(--orange)';
+      document.getElementById('tournamentAction').textContent = evidence.action || 'Historical evidence gate';
+      document.getElementById('tournamentAction').style.color = evidence.eligible ? 'var(--green)' : 'var(--orange)';
+      document.getElementById('tournamentReason').textContent = evidence.reason || 'Download history and run the fixed tests first.';
+
+      var oos = (data.methods || []).filter(function(row) { return row.split === 'out_of_sample' && row.symbol === currentCoin; });
       var methodsEl = document.getElementById('tournamentMethods');
       methodsEl.innerHTML = oos.length ? oos.map(function(row) {
         var average = Number(row.avg_net_return_pct || 0);
+        var lower = row.lower_net_return_bound_pct == null ? '—' : (Number(row.lower_net_return_bound_pct) >= 0 ? '+' : '') + Number(row.lower_net_return_bound_pct).toFixed(3) + '%';
+        var winRate = row.win_rate_pct == null ? '—' : Number(row.win_rate_pct).toFixed(1) + '%';
         return '<div class="research-model">' +
-          '<div class="research-model-name">Locked later-period: ' + escapeHtml(tournamentRuleName(row.rule)) + '</div>' +
-          '<div class="research-model-metric" style="color:var(--muted2)">' +
+          '<div class="research-model-name">' + currentCoin + ' locked later-period: ' + escapeHtml(tournamentRuleName(row.rule)) + '</div>' +
+          '<div class="research-model-metric" style="color:' + (row.validated ? 'var(--green)' : 'var(--muted2)') + '">' +
             (average >= 0 ? '+' : '') + average.toFixed(3) + '% avg net / period</div>' +
-          '<div class="research-model-note">' + row.traded + ' trades across ' + row.periods + ' independent 24h periods (' + row.coverage_pct + '% coverage). Historical evidence only; not a live instruction.</div></div>';
+          '<div class="research-model-note">' + row.traded + ' trades across ' + row.periods + ' non-overlapping 24h periods (' + row.coverage_pct + '% coverage) · win rate ' + winRate + ' · cautious lower bound ' + lower + ' · worst drawdown ' + Number(row.max_drawdown_pct).toFixed(2) + '%.</div>' +
+          '<div class="research-model-note">' + (row.validated ? 'Passed the historical gate only; it still needs a separate live-market setup check.' : 'Did not pass the historical gate. It cannot produce a live trading signal.') + '</div></div>';
       }).join('') : '';
       if (running) setTimeout(loadTournamentStatus, 2500);
     })
@@ -1302,15 +1324,43 @@ function loadTournamentStatus() {
 }
 
 function startTournamentDownload() {
+  var status = document.getElementById('tournamentStatus');
+  var explanation = document.getElementById('tournamentExplanation');
+  status.textContent = 'STARTING…';
+  status.style.color = 'var(--orange)';
+  explanation.textContent = 'Starting the separate historical download…';
   fetch(BASE + '/tournament/download', {method: 'POST'})
-    .then(function(r) { return r.json(); })
-    .then(function() { loadTournamentStatus(); });
+    .then(function(r) { return r.json().then(function(data) { return {ok:r.ok, data:data}; }); })
+    .then(function(result) {
+      if (!result.ok) throw new Error(result.data.error || result.data.message || 'The server rejected the download request.');
+      explanation.textContent = result.data.message || 'Download started.';
+      loadTournamentStatus();
+    })
+    .catch(function(error) {
+      status.textContent = 'COULD NOT START';
+      status.style.color = 'var(--red)';
+      explanation.textContent = 'Download could not start. Confirm that you copied the new app.py, stopped the old app, and started it again. Details: ' + error.message;
+    });
 }
 
 function startTournamentEvaluation() {
+  var status = document.getElementById('tournamentStatus');
+  var explanation = document.getElementById('tournamentExplanation');
+  status.textContent = 'STARTING…';
+  status.style.color = 'var(--orange)';
+  explanation.textContent = 'Starting the fixed historical evaluation…';
   fetch(BASE + '/tournament/evaluate', {method: 'POST'})
-    .then(function(r) { return r.json(); })
-    .then(function() { loadTournamentStatus(); });
+    .then(function(r) { return r.json().then(function(data) { return {ok:r.ok, data:data}; }); })
+    .then(function(result) {
+      if (!result.ok) throw new Error(result.data.error || result.data.message || 'The server rejected the evaluation request.');
+      explanation.textContent = result.data.message || 'Evaluation started.';
+      loadTournamentStatus();
+    })
+    .catch(function(error) {
+      status.textContent = 'COULD NOT START';
+      status.style.color = 'var(--red)';
+      explanation.textContent = 'Evaluation could not start. Download and check history first, then confirm the new app.py is running. Details: ' + error.message;
+    });
 }
 
 function loadPredictionAudit(symbol) {

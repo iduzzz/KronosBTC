@@ -891,9 +891,20 @@ def init_tournament_db():
         conn.execute("""CREATE TABLE IF NOT EXISTS experimental_observations (
             symbol TEXT NOT NULL, observed_at TEXT NOT NULL, target_at TEXT NOT NULL,
             entry_price REAL NOT NULL, alignment_score REAL NOT NULL, bias TEXT NOT NULL,
-            components_json TEXT NOT NULL, actual_price REAL, direction_correct INTEGER,
+            components_json TEXT NOT NULL, feature_json TEXT, test_action TEXT,
+            actual_price REAL, actual_move_pct REAL, net_return_pct REAL, direction_correct INTEGER,
             PRIMARY KEY (symbol, target_at)
         )""")
+        for statement in (
+            "ALTER TABLE experimental_observations ADD COLUMN feature_json TEXT",
+            "ALTER TABLE experimental_observations ADD COLUMN test_action TEXT",
+            "ALTER TABLE experimental_observations ADD COLUMN actual_move_pct REAL",
+            "ALTER TABLE experimental_observations ADD COLUMN net_return_pct REAL",
+        ):
+            try:
+                conn.execute(statement)
+            except sqlite3.OperationalError:
+                pass
 
 
 def _tournament_update(**fields):
@@ -1214,9 +1225,13 @@ def _experimental_market_observation(symbol):
     score = round(max(0, min(100, 50 + bull - bear)), 1)
     bias = "UPSIDE OBSERVATION" if score >= 60 else "DOWNSIDE OBSERVATION" if score <= 40 else "MIXED OBSERVATION"
     target = (pd.Timestamp(df["timestamps"].iloc[-1]) + pd.Timedelta(hours=24)).isoformat()
+    action = "LONG_TEST" if score >= 60 else "SHORT_TEST" if score <= 40 else "NO_TRADE_TEST"
+    features = {"ema50": round(float(ema50), 6), "ema200": round(float(ema200), 6),
+                "momentum_24_pct": round(float(momentum_24), 4), "macd_hist": ind["macd_hist"],
+                "rsi14": ind["rsi"], "adx": ind["adx"], "volume_ratio": round(float(volume_ratio), 4)}
     return {"symbol": symbol, "observed_at": datetime.now(timezone.utc).isoformat(), "target_at": target,
             "entry_price": float(close[-1]), "alignment_score": score, "bias": bias,
-            "components": ingredients}
+            "components": ingredients, "features": features, "test_action": action}
 
 
 def run_experimental_checks():
@@ -1234,8 +1249,8 @@ def run_experimental_checks():
                 exists = conn.execute("SELECT 1 FROM experimental_observations WHERE symbol=? AND target_at=?", (symbol, observation["target_at"])).fetchone()
                 if not exists:
                     conn.execute("""INSERT INTO experimental_observations
-                      (symbol, observed_at, target_at, entry_price, alignment_score, bias, components_json)
-                      VALUES (?, ?, ?, ?, ?, ?, ?)""", (symbol, observation["observed_at"], observation["target_at"], observation["entry_price"], observation["alignment_score"], observation["bias"], json.dumps(observation["components"])))
+                      (symbol, observed_at, target_at, entry_price, alignment_score, bias, components_json, feature_json, test_action)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", (symbol, observation["observed_at"], observation["target_at"], observation["entry_price"], observation["alignment_score"], observation["bias"], json.dumps(observation["components"]), json.dumps(observation["features"]), observation["test_action"]))
                     saved += 1
         with experimental_lock: experimental_state.update({"running": False, "message": f"Saved {saved} new 24-hour test observations. They are not trade instructions."})
     except Exception as exc:
@@ -1246,26 +1261,32 @@ def get_experimental_status():
     try:
         init_tournament_db()
         with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
-            pending = conn.execute("SELECT symbol, target_at, entry_price, alignment_score FROM experimental_observations WHERE actual_price IS NULL").fetchall()
-        for symbol, target_at, entry, score in pending:
+            pending = conn.execute("SELECT symbol, target_at, entry_price, alignment_score, test_action FROM experimental_observations WHERE actual_price IS NULL").fetchall()
+        for symbol, target_at, entry, score, action in pending:
             actual = fetch_exact_hourly_close(symbol, target_at)
             if actual is not None:
                 correct = int((score >= 50 and actual > entry) or (score < 50 and actual <= entry))
+                move = (actual / entry - 1) * 100
+                resolved_action = action or ("LONG_TEST" if score >= 60 else "SHORT_TEST" if score <= 40 else "NO_TRADE_TEST")
+                net = (move - ROUND_TRIP_COST_PCT if resolved_action == "LONG_TEST" else
+                       -move - ROUND_TRIP_COST_PCT if resolved_action == "SHORT_TEST" else 0.0)
                 with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
-                    conn.execute("UPDATE experimental_observations SET actual_price=?, direction_correct=? WHERE symbol=? AND target_at=?", (actual, correct, symbol, target_at))
+                    conn.execute("""UPDATE experimental_observations SET actual_price=?, actual_move_pct=?, net_return_pct=?,
+                      test_action=?, direction_correct=? WHERE symbol=? AND target_at=?""", (actual, round(move, 4), round(net, 4), resolved_action, correct, symbol, target_at))
         with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
             rows = conn.execute("SELECT symbol, observed_at, target_at, alignment_score, bias, components_json FROM experimental_observations ORDER BY observed_at DESC").fetchall()
             stats_rows = conn.execute("""SELECT symbol, COUNT(*),
                 SUM(CASE WHEN actual_price IS NOT NULL THEN 1 ELSE 0 END),
-                SUM(CASE WHEN direction_correct=1 THEN 1 ELSE 0 END)
+                SUM(CASE WHEN direction_correct=1 THEN 1 ELSE 0 END), AVG(net_return_pct)
                 FROM experimental_observations GROUP BY symbol""").fetchall()
         latest = {}
         for symbol, observed, target, score, bias, components in rows:
             if symbol not in latest: latest[symbol] = {"observed_at": observed, "target_at": target, "score": score, "bias": bias, "components": json.loads(components)}
         with experimental_lock: state = dict(experimental_state)
         stats = {symbol: {"recorded": total, "settled": settled or 0, "correct": correct or 0,
-                          "direction_match_pct": round((correct or 0) / settled * 100, 1) if settled else None}
-                 for symbol, total, settled, correct in stats_rows}
+                          "direction_match_pct": round((correct or 0) / settled * 100, 1) if settled else None,
+                          "avg_net_return_pct": round(net or 0.0, 3) if settled else None}
+                 for symbol, total, settled, correct, net in stats_rows}
         return {"state": state, "by_coin": latest, "stats_by_coin": stats,
                 "minimum_settled_for_calibration": 50,
                 "note": "Input Alignment is a prototype data collector, not a probability of profit or a trading instruction."}

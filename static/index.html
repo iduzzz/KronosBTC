@@ -301,6 +301,25 @@ canvas{width:100%!important;height:100%!important}
       <div class="research-models" id="researchModels"><div class="research-model"><div class="research-model-name">Loading models…</div></div></div>
     </section>
 
+    <section class="research-panel" aria-label="Historical research lab" style="border-color:rgba(96,165,250,.7)">
+      <div class="research-head">
+        <div>
+          <div class="research-title">🧪 Historical Research Lab</div>
+          <div class="research-sub" id="tournamentExplanation">Uses a separate database of closed hourly candles. It cannot place trades.</div>
+        </div>
+        <div class="research-status" id="tournamentStatus">NOT STARTED</div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
+        <button class="btn-predict" id="downloadHistoryBtn" onclick="startTournamentDownload()" style="padding:8px 12px;font-size:11px">1. Download &amp; Check History</button>
+        <button class="btn-predict" id="evaluateHistoryBtn" onclick="startTournamentEvaluation()" style="padding:8px 12px;font-size:11px;background:linear-gradient(135deg,#0f766e,#2563eb)">2. Run Fixed Historical Tests</button>
+      </div>
+      <div style="font-size:10px;color:var(--muted2);line-height:1.6;margin-bottom:10px">
+        First download data. The second button tests pre-defined no-trade and momentum rules with a 24-hour hold, fees, gaps excluded, and a locked later-period check. It does not create a live signal.
+      </div>
+      <div class="research-models" id="tournamentData"><div class="research-model"><div class="research-model-name">No separate historical data downloaded yet.</div></div></div>
+      <div class="research-models" id="tournamentMethods"></div>
+    </section>
+
     <section class="audit-panel" aria-label="Prediction audit">
       <div class="audit-title">🔎 Prediction Audit — <span id="auditCoin">ZEC</span></div>
       <div class="audit-note" id="auditNote">Loading the saved forecast facts…</div>
@@ -827,6 +846,7 @@ function showResults(d) {
   stopTimer();
   document.getElementById('results').classList.remove('hidden');
   loadResearchComparison();
+  loadTournamentStatus();
   loadPredictionAudit(currentCoin);
 
   var rb = document.getElementById('refreshBadge');
@@ -1227,6 +1247,70 @@ function loadResearchComparison() {
       document.getElementById('researchStatus').style.color = 'var(--orange)';
       document.getElementById('researchExplanation').textContent = 'No comparison data could be loaded. This does not create a trading signal.';
     });
+}
+
+function tournamentRuleName(rule) {
+  return rule === 'no_trade' ? 'No-trade baseline' :
+         rule === 'momentum_24' ? '24h momentum baseline' :
+         rule === 'trend_momentum' ? 'Trend + momentum rule' : rule;
+}
+
+function loadTournamentStatus() {
+  fetch(BASE + '/tournament/status')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var state = data.state || {};
+      var status = document.getElementById('tournamentStatus');
+      var explanation = document.getElementById('tournamentExplanation');
+      var download = document.getElementById('downloadHistoryBtn');
+      var evaluate = document.getElementById('evaluateHistoryBtn');
+      var running = !!state.running;
+      status.textContent = running ? 'WORKING' : String(state.stage || 'not_started').replace(/_/g, ' ').toUpperCase();
+      status.style.color = state.stage === 'error' ? 'var(--red)' : running ? 'var(--orange)' : 'var(--accent2)';
+      explanation.textContent = state.message || data.plain_rule || '';
+      download.disabled = running;
+      evaluate.disabled = running;
+      download.style.opacity = running ? '.55' : '1';
+      evaluate.style.opacity = running ? '.55' : '1';
+
+      var dataEl = document.getElementById('tournamentData');
+      var history = data.data || [];
+      dataEl.innerHTML = history.length ? history.map(function(row) {
+        var gap = Number(row.gaps || 0);
+        return '<div class="research-model">' +
+          '<div class="research-model-name">' + escapeHtml(row.symbol) + ' closed hourly history</div>' +
+          '<div class="research-model-metric" style="color:' + (gap ? 'var(--orange)' : 'var(--accent2)') + '">' + Number(row.candles || 0).toLocaleString() + ' candles</div>' +
+          '<div class="research-model-note">' + (gap ? gap + ' time gaps found — affected windows are excluded.' : 'No hourly gaps found.') + '</div></div>';
+      }).join('') : '<div class="research-model"><div class="research-model-name">No separate historical data downloaded yet.</div></div>';
+
+      var oos = (data.methods || []).filter(function(row) { return row.split === 'out_of_sample'; });
+      var methodsEl = document.getElementById('tournamentMethods');
+      methodsEl.innerHTML = oos.length ? oos.map(function(row) {
+        var average = Number(row.avg_net_return_pct || 0);
+        return '<div class="research-model">' +
+          '<div class="research-model-name">Locked later-period: ' + escapeHtml(tournamentRuleName(row.rule)) + '</div>' +
+          '<div class="research-model-metric" style="color:var(--muted2)">' +
+            (average >= 0 ? '+' : '') + average.toFixed(3) + '% avg net / period</div>' +
+          '<div class="research-model-note">' + row.traded + ' trades across ' + row.periods + ' independent 24h periods (' + row.coverage_pct + '% coverage). Historical evidence only; not a live instruction.</div></div>';
+      }).join('') : '';
+      if (running) setTimeout(loadTournamentStatus, 2500);
+    })
+    .catch(function() {
+      document.getElementById('tournamentStatus').textContent = 'UNAVAILABLE';
+      document.getElementById('tournamentStatus').style.color = 'var(--orange)';
+    });
+}
+
+function startTournamentDownload() {
+  fetch(BASE + '/tournament/download', {method: 'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function() { loadTournamentStatus(); });
+}
+
+function startTournamentEvaluation() {
+  fetch(BASE + '/tournament/evaluate', {method: 'POST'})
+    .then(function(r) { return r.json(); })
+    .then(function() { loadTournamentStatus(); });
 }
 
 function loadPredictionAudit(symbol) {

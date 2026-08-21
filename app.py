@@ -49,6 +49,9 @@ TOURNAMENT_HORIZON_HOURS = 24
 TOURNAMENT_STEP_HOURS = 24
 TOURNAMENT_HOLDOUT_FRACTION = 0.30
 TOURNAMENT_MIN_HISTORY_HOURS = 168
+TOURNAMENT_MIN_OUT_OF_SAMPLE_PERIODS = 200
+TOURNAMENT_MIN_OUT_OF_SAMPLE_TRADES = 100
+TOURNAMENT_MAX_DRAWDOWN_PCT = -20.0
 
 # This application is a local research tool.  It deliberately has no exchange
 # credentials or order-submission code.  Paper mode must be explicitly enabled.
@@ -1009,6 +1012,10 @@ def _evaluate_tournament_rule(run_id, symbol, times, closes, split, start_index,
 def evaluate_tournament_history():
     try:
         init_tournament_db()
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            available = conn.execute("SELECT COUNT(*) FROM candles").fetchone()[0]
+        if available == 0:
+            raise RuntimeError("No historical candles are available. Use 'Download & Check History' first.")
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         config = {"horizon_hours": TOURNAMENT_HORIZON_HOURS, "step_hours": TOURNAMENT_STEP_HOURS,
                   "holdout_fraction": TOURNAMENT_HOLDOUT_FRACTION, "round_trip_cost_pct": ROUND_TRIP_COST_PCT,
@@ -1047,28 +1054,72 @@ def evaluate_tournament_history():
         _tournament_update(running=False, stage="error", error=str(exc)[:500], message="Historical evaluation failed; no live signal was created.")
 
 
+def _tournament_result_metrics(rows):
+    """Metrics for one symbol/rule/split; no cross-coin pooling is implied."""
+    returns = [float(row[1]) for row in rows]
+    traded_returns = [float(row[1]) for row in rows if row[0] in ("LONG", "SHORT")]
+    equity, peak, max_drawdown = 1.0, 1.0, 0.0
+    for value in returns:
+        equity *= 1 + value / 100
+        peak = max(peak, equity)
+        max_drawdown = min(max_drawdown, (equity / peak - 1) * 100)
+    lower = _block_bootstrap_lower_mean(returns) if returns else None
+    return {
+        "periods": len(returns), "traded": len(traded_returns),
+        "coverage_pct": round(len(traded_returns) / len(returns) * 100, 1) if returns else 0.0,
+        "avg_net_return_pct": round(float(np.mean(returns)), 3) if returns else 0.0,
+        "total_net_return_pct": round(float(np.sum(returns)), 3) if returns else 0.0,
+        "win_rate_pct": round(sum(value > 0 for value in traded_returns) / len(traded_returns) * 100, 1) if traded_returns else None,
+        "lower_net_return_bound_pct": round(float(lower), 3) if lower is not None else None,
+        "max_drawdown_pct": round(max_drawdown, 3),
+    }
+
+
 def get_tournament_summary():
     try:
         init_tournament_db()
         with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
             ingest = conn.execute("SELECT symbol, candle_count, gap_count, first_open_time, last_open_time FROM ingestion_status ORDER BY symbol").fetchall()
             run = conn.execute("SELECT run_id, completed_at FROM evaluation_runs WHERE status='completed' ORDER BY completed_at DESC LIMIT 1").fetchone()
-            results = [] if not run else conn.execute("""SELECT split, rule_name, COUNT(*),
-                SUM(CASE WHEN decision IN ('LONG','SHORT') THEN 1 ELSE 0 END),
-                AVG(net_return_pct), SUM(net_return_pct)
-                FROM evaluation_results WHERE run_id=? GROUP BY split, rule_name ORDER BY split, rule_name""", (run[0],)).fetchall()
+            results = [] if not run else conn.execute("""SELECT split, symbol, rule_name, decision, net_return_pct
+                FROM evaluation_results WHERE run_id=? ORDER BY split, symbol, rule_name, origin_time""", (run[0],)).fetchall()
         methods = []
-        for split, rule, periods, traded, average_net, total_net in results:
-            methods.append({"split": split, "rule": rule, "periods": periods, "traded": traded,
-                            "coverage_pct": round(traded / periods * 100, 1) if periods else 0.0,
-                            "avg_net_return_pct": round(average_net or 0.0, 3), "total_net_return_pct": round(total_net or 0.0, 3)})
+        grouped = {}
+        for split, symbol, rule, decision, net in results:
+            grouped.setdefault((split, symbol, rule), []).append((decision, net))
+        evidence_by_coin = {}
+        for (split, symbol, rule), rows in grouped.items():
+            metric = {"split": split, "symbol": symbol, "rule": rule, **_tournament_result_metrics(rows)}
+            metric["validated"] = (
+                split == "out_of_sample" and rule != "no_trade" and
+                metric["periods"] >= TOURNAMENT_MIN_OUT_OF_SAMPLE_PERIODS and
+                metric["traded"] >= TOURNAMENT_MIN_OUT_OF_SAMPLE_TRADES and
+                metric["lower_net_return_bound_pct"] is not None and
+                metric["lower_net_return_bound_pct"] > 0 and
+                metric["max_drawdown_pct"] >= TOURNAMENT_MAX_DRAWDOWN_PCT
+            )
+            methods.append(metric)
+        for symbol in COINS:
+            candidates = [m for m in methods if m["split"] == "out_of_sample" and m["symbol"] == symbol and m["validated"]]
+            if not candidates:
+                evidence_by_coin[symbol] = {"score": 0, "eligible": False,
+                    "action": "NO TRADE — NO VALIDATED RULE",
+                    "reason": "No tested rule has a positive cautious net-return bound after costs for this coin."}
+            else:
+                best = max(candidates, key=lambda m: m["lower_net_return_bound_pct"])
+                score = min(100, round(60 + min(25, best["lower_net_return_bound_pct"] * 10) +
+                                       min(15, (best["win_rate_pct"] or 50) - 50)))
+                evidence_by_coin[symbol] = {"score": score, "eligible": True,
+                    "action": "HISTORICALLY ELIGIBLE — LIVE SETUP NOT YET IMPLEMENTED",
+                    "reason": f"{best['rule']} passed fixed out-of-sample gates; a separate current-market setup check is still required."}
         with tournament_lock:
             state = dict(tournament_state)
         return {"state": state, "data": [{"symbol": r[0], "candles": r[1], "gaps": r[2], "first": r[3], "last": r[4]} for r in ingest],
                 "latest_run": None if not run else {"run_id": run[0], "completed_at": run[1]}, "methods": methods,
-                "plain_rule": "Only the locked out-of-sample rows are decision evidence. A positive historical number is not a promise of future profit."}
+                "evidence_by_coin": evidence_by_coin,
+                "plain_rule": "Each coin is evaluated separately. Only locked out-of-sample rows count as evidence; a positive historical number is not a promise of future profit."}
     except Exception as exc:
-        return {"state": {"running": False, "stage": "error", "message": "Tournament status unavailable.", "error": str(exc)}, "data": [], "methods": [], "latest_run": None,
+        return {"state": {"running": False, "stage": "error", "message": "Tournament status unavailable.", "error": str(exc)}, "data": [], "methods": [], "evidence_by_coin": {}, "latest_run": None,
                 "plain_rule": "No historical evaluation is available."}
 
 

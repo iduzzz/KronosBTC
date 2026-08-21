@@ -331,6 +331,13 @@ canvas{width:100%!important;height:100%!important}
       <div class="research-models" id="tournamentMethods"></div>
     </section>
 
+    <section class="research-panel" aria-label="Experimental market observation" style="border-color:rgba(245,158,11,.7)">
+      <div class="research-head"><div><div class="research-title">🧭 Experimental Market Score — <span id="experimentalCoin">ZEC</span></div><div class="research-sub" id="experimentalNote">Test-only measurement; not a probability of profit.</div></div><div class="research-status" id="experimentalStatus">NO SAMPLE</div></div>
+      <div class="research-grid"><div class="research-tile"><div class="research-label">Current test score</div><div class="research-value" id="experimentalScore">— / 100</div><div class="research-detail" id="experimentalBias">No observation recorded</div></div><div class="research-tile"><div class="research-label">What the score observed</div><div class="research-detail" id="experimentalIngredients">—</div></div></div>
+      <button class="btn-predict" id="experimentalRun" onclick="runExperimentalCheck()" style="padding:8px 12px;font-size:11px">Record Today’s Test Check — All Coins</button>
+      <div style="font-size:10px;color:var(--muted2);margin-top:8px">Use at most once per 24 hours. Each score is saved and later compared with the exact 24-hour close before it can be considered useful.</div>
+    </section>
+
     <section class="audit-panel" aria-label="Prediction audit" style="display:none">
       <div class="audit-title">🔎 Prediction Audit — <span id="auditCoin">ZEC</span></div>
       <div class="audit-note" id="auditNote">Loading the saved forecast facts…</div>
@@ -780,6 +787,28 @@ function showCoinState() {
   document.getElementById('results').classList.remove('hidden');
   document.getElementById('updatedTime').style.display = 'none';
   loadTournamentStatus();
+  loadExperimentalStatus();
+}
+
+function loadExperimentalStatus() {
+  fetch(BASE + '/experimental/status').then(function(r){ return r.json(); }).then(function(data) {
+    var state = data.state || {}, item = (data.by_coin || {})[currentCoin];
+    document.getElementById('experimentalCoin').textContent = currentCoin + '/USDT';
+    document.getElementById('experimentalStatus').textContent = state.running ? 'RECORDING' : item ? 'TEST ONLY' : 'NO SAMPLE';
+    document.getElementById('experimentalNote').textContent = data.note || state.message || '';
+    document.getElementById('experimentalScore').textContent = item ? Number(item.score).toFixed(0) + ' / 100' : '— / 100';
+    document.getElementById('experimentalScore').style.color = 'var(--orange)';
+    document.getElementById('experimentalBias').textContent = item ? item.bias + ' — unproven test observation' : 'Record a test observation first.';
+    document.getElementById('experimentalIngredients').textContent = item ? (item.components || []).join(' · ') : '—';
+    document.getElementById('experimentalRun').disabled = !!state.running;
+    if (state.running) setTimeout(loadExperimentalStatus, 2500);
+  });
+}
+
+function runExperimentalCheck() {
+  document.getElementById('experimentalStatus').textContent = 'STARTING…';
+  fetch(BASE + '/experimental/run-all', {method:'POST'}).then(function(r){ return r.json(); }).then(function(){ loadExperimentalStatus(); })
+    .catch(function(){ document.getElementById('experimentalStatus').textContent = 'UNAVAILABLE'; });
 }
 
 function startPolling() {

@@ -43,6 +43,12 @@ REFRESH_SECS   = 3600
 FORECAST_COOLDOWN_SECS = PRED_LEN * 3600
 NUM_WORKERS    = 1
 DB_FILE        = os.path.join(BASE_DIR, "kronos.db")
+TOURNAMENT_DB_FILE = os.path.join(BASE_DIR, "tournament_data.db")
+TOURNAMENT_START_ISO = os.environ.get("KRONOS_TOURNAMENT_START", "2023-01-01T00:00:00+00:00")
+TOURNAMENT_HORIZON_HOURS = 24
+TOURNAMENT_STEP_HOURS = 24
+TOURNAMENT_HOLDOUT_FRACTION = 0.30
+TOURNAMENT_MIN_HISTORY_HOURS = 168
 
 # This application is a local research tool.  It deliberately has no exchange
 # credentials or order-submission code.  Paper mode must be explicitly enabled.
@@ -88,6 +94,9 @@ stats_cache  = {"data": None, "comparison": None, "updated_monotonic": 0.0}
 stats_lock   = threading.Lock()
 lookback_cache = {}
 lookback_lock  = threading.Lock()
+tournament_lock = threading.Lock()
+tournament_state = {"running": False, "stage": "not_started", "message": "Historical research has not been downloaded yet.",
+                    "symbol": None, "downloaded": 0, "total": 0, "updated_at": None, "error": None}
 
 
 def _request_with_retry(url, *, params=None, headers=None, timeout=(3, 12), retries=2):
@@ -844,6 +853,223 @@ def fetch_candles(symbol, interval="1h", limit=384):
         except Exception as e:
             print(f"[Data] {url} failed: {e}", flush=True)
     raise RuntimeError(f"All Binance endpoints failed for {symbol} {interval}")
+
+
+# ── Isolated historical research lab ──────────────────────────────────────────
+# This database never alters kronos.db or the live forecast cache.  Its purpose
+# is to test fixed, simple rules on closed candles before anyone treats a rule
+# as evidence worth considering.
+def init_tournament_db():
+    with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("""CREATE TABLE IF NOT EXISTS candles (
+            symbol TEXT NOT NULL, open_time_ms INTEGER NOT NULL,
+            open REAL NOT NULL, high REAL NOT NULL, low REAL NOT NULL,
+            close REAL NOT NULL, volume REAL NOT NULL,
+            PRIMARY KEY (symbol, open_time_ms)
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS ingestion_status (
+            symbol TEXT PRIMARY KEY, requested_start TEXT NOT NULL, first_open_time TEXT,
+            last_open_time TEXT, candle_count INTEGER NOT NULL DEFAULT 0,
+            gap_count INTEGER NOT NULL DEFAULT 0, checked_at TEXT NOT NULL, error TEXT
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS evaluation_results (
+            run_id TEXT NOT NULL, split TEXT NOT NULL, symbol TEXT NOT NULL,
+            rule_name TEXT NOT NULL, origin_time TEXT NOT NULL, target_time TEXT NOT NULL,
+            decision TEXT NOT NULL, gross_return_pct REAL NOT NULL, net_return_pct REAL NOT NULL,
+            PRIMARY KEY (run_id, split, symbol, rule_name, origin_time)
+        )""")
+        conn.execute("""CREATE TABLE IF NOT EXISTS evaluation_runs (
+            run_id TEXT PRIMARY KEY, started_at TEXT NOT NULL, completed_at TEXT,
+            config_json TEXT NOT NULL, status TEXT NOT NULL, error TEXT
+        )""")
+
+
+def _tournament_update(**fields):
+    with tournament_lock:
+        tournament_state.update(fields)
+        tournament_state["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+
+def _tournament_endpoint():
+    return "https://fapi.binance.com/fapi/v1/klines" if EXECUTION_VENUE == "futures" else "https://api.binance.com/api/v3/klines"
+
+
+def _download_historical_candles(symbol):
+    """Download only completed hourly candles, paginating deterministically."""
+    start_ms = int(_as_utc(TOURNAMENT_START_ISO).timestamp() * 1000)
+    now_ms = int(datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0).timestamp() * 1000)
+    cursor = start_ms
+    rows_written = 0
+    while cursor < now_ms:
+        raw = _request_with_retry(_tournament_endpoint(), params={
+            "symbol": COINS[symbol], "interval": "1h", "startTime": cursor, "endTime": now_ms - 1, "limit": 1000
+        }, timeout=(3, 20), retries=2).json()
+        if not raw:
+            break
+        completed = [row for row in raw if int(row[6]) < now_ms]
+        if not completed:
+            break
+        values = [(symbol, int(row[0]), float(row[1]), float(row[2]), float(row[3]), float(row[4]), float(row[5]))
+                  for row in completed]
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            conn.executemany("""INSERT OR IGNORE INTO candles
+                (symbol, open_time_ms, open, high, low, close, volume) VALUES (?, ?, ?, ?, ?, ?, ?)""", values)
+        rows_written += len(values)
+        next_cursor = int(completed[-1][0]) + 3_600_000
+        if next_cursor <= cursor:
+            raise RuntimeError(f"{symbol}: history downloader did not advance")
+        cursor = next_cursor
+        _tournament_update(symbol=symbol, downloaded=rows_written,
+                           message=f"Downloading {symbol}: {rows_written:,} closed hourly candles saved…")
+        time.sleep(0.08)
+        if len(raw) < 1000:
+            break
+    return rows_written
+
+
+def _validate_tournament_symbol(symbol):
+    with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+        rows = conn.execute("SELECT open_time_ms FROM candles WHERE symbol=? ORDER BY open_time_ms", (symbol,)).fetchall()
+    times = [r[0] for r in rows]
+    gaps = sum(1 for before, after in zip(times, times[1:]) if after - before != 3_600_000)
+    first = datetime.fromtimestamp(times[0] / 1000, tz=timezone.utc).isoformat() if times else None
+    last = datetime.fromtimestamp(times[-1] / 1000, tz=timezone.utc).isoformat() if times else None
+    with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+        conn.execute("""INSERT INTO ingestion_status
+             (symbol, requested_start, first_open_time, last_open_time, candle_count, gap_count, checked_at, error)
+             VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+             ON CONFLICT(symbol) DO UPDATE SET requested_start=excluded.requested_start,
+               first_open_time=excluded.first_open_time, last_open_time=excluded.last_open_time,
+               candle_count=excluded.candle_count, gap_count=excluded.gap_count,
+               checked_at=excluded.checked_at, error=NULL""",
+             (symbol, TOURNAMENT_START_ISO, first, last, len(times), gaps, datetime.now(timezone.utc).isoformat()))
+    return {"symbol": symbol, "candles": len(times), "gaps": gaps, "first": first, "last": last}
+
+
+def download_tournament_history():
+    try:
+        init_tournament_db()
+        _tournament_update(running=True, stage="download", total=len(COINS), downloaded=0, error=None,
+                           message="Starting isolated historical download…")
+        checks = []
+        for index, symbol in enumerate(COINS):
+            _tournament_update(symbol=symbol, total=len(COINS), downloaded=index,
+                               message=f"Preparing {symbol} history…")
+            _download_historical_candles(symbol)
+            checks.append(_validate_tournament_symbol(symbol))
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            conn.commit()
+        bad = [c for c in checks if c["gaps"]]
+        message = "History downloaded and gap-checked." if not bad else "History downloaded, but gaps were found. Evaluation will exclude affected windows."
+        _tournament_update(running=False, stage="ready", symbol=None, downloaded=len(COINS), message=message)
+    except Exception as exc:
+        print(f"[Tournament] download failed: {exc}", flush=True)
+        _tournament_update(running=False, stage="error", error=str(exc)[:500], message="Historical download failed; no evaluation was run.")
+
+
+def _historical_rule_decision(closes, index, rule_name):
+    """Fixed rules declared before evaluation; only observations at/index before t are used."""
+    price = closes[index]
+    move_24 = price / closes[index - 24] - 1
+    sma_72 = float(np.mean(closes[index - 71:index + 1]))
+    if rule_name == "no_trade":
+        return "NO_TRADE"
+    if rule_name == "momentum_24":
+        return "LONG" if move_24 >= 0.01 else "SHORT" if move_24 <= -0.01 else "NO_TRADE"
+    if rule_name == "trend_momentum":
+        if move_24 >= 0.01 and price > sma_72:
+            return "LONG"
+        if move_24 <= -0.01 and price < sma_72:
+            return "SHORT"
+        return "NO_TRADE"
+    raise ValueError(f"Unknown historical rule {rule_name}")
+
+
+def _evaluate_tournament_rule(run_id, symbol, times, closes, split, start_index, end_index, rule_name):
+    rows = []
+    for index in range(start_index, end_index + 1, TOURNAMENT_STEP_HOURS):
+        # A rule may only use candles up to index.  Exclude any discontinuous
+        # lookback or target window rather than inventing a missing price.
+        window_times = times[index - TOURNAMENT_MIN_HISTORY_HOURS:index + TOURNAMENT_HORIZON_HOURS + 1]
+        if len(window_times) != TOURNAMENT_MIN_HISTORY_HOURS + TOURNAMENT_HORIZON_HOURS + 1 or any(
+                after - before != 3_600_000 for before, after in zip(window_times, window_times[1:])):
+            continue
+        decision = _historical_rule_decision(closes, index, rule_name)
+        raw_move = (closes[index + TOURNAMENT_HORIZON_HOURS] / closes[index] - 1) * 100
+        gross = raw_move if decision == "LONG" else -raw_move if decision == "SHORT" else 0.0
+        net = gross - ROUND_TRIP_COST_PCT if decision in ("LONG", "SHORT") else 0.0
+        rows.append((run_id, split, symbol, rule_name,
+                     datetime.fromtimestamp(times[index] / 1000, tz=timezone.utc).isoformat(),
+                     datetime.fromtimestamp(times[index + TOURNAMENT_HORIZON_HOURS] / 1000, tz=timezone.utc).isoformat(),
+                     decision, round(gross, 6), round(net, 6)))
+    return rows
+
+
+def evaluate_tournament_history():
+    try:
+        init_tournament_db()
+        run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        config = {"horizon_hours": TOURNAMENT_HORIZON_HOURS, "step_hours": TOURNAMENT_STEP_HOURS,
+                  "holdout_fraction": TOURNAMENT_HOLDOUT_FRACTION, "round_trip_cost_pct": ROUND_TRIP_COST_PCT,
+                  "rules": ["no_trade", "momentum_24", "trend_momentum"]}
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            conn.execute("INSERT INTO evaluation_runs (run_id, started_at, config_json, status) VALUES (?, ?, ?, ?)",
+                         (run_id, datetime.now(timezone.utc).isoformat(), json.dumps(config), "running"))
+        _tournament_update(running=True, stage="evaluate", total=len(COINS), downloaded=0, error=None,
+                           message="Evaluating fixed rules on separated historical periods…")
+        all_rows = []
+        for coin_index, symbol in enumerate(COINS):
+            with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+                candles = conn.execute("SELECT open_time_ms, close FROM candles WHERE symbol=? ORDER BY open_time_ms", (symbol,)).fetchall()
+            times = [int(row[0]) for row in candles]
+            closes = np.asarray([float(row[1]) for row in candles], dtype=float)
+            if len(closes) < TOURNAMENT_MIN_HISTORY_HOURS + TOURNAMENT_HORIZON_HOURS + 48:
+                continue
+            split_index = int(len(closes) * (1 - TOURNAMENT_HOLDOUT_FRACTION))
+            for rule_name in config["rules"]:
+                all_rows.extend(_evaluate_tournament_rule(run_id, symbol, times, closes, "in_sample",
+                    TOURNAMENT_MIN_HISTORY_HOURS, split_index - TOURNAMENT_HORIZON_HOURS, rule_name))
+                all_rows.extend(_evaluate_tournament_rule(run_id, symbol, times, closes, "out_of_sample",
+                    split_index, len(closes) - TOURNAMENT_HORIZON_HOURS - 1, rule_name))
+            _tournament_update(symbol=symbol, downloaded=coin_index + 1, total=len(COINS),
+                               message=f"Evaluated {symbol} using only information available at each historical hour…")
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            conn.executemany("""INSERT OR REPLACE INTO evaluation_results
+                (run_id, split, symbol, rule_name, origin_time, target_time, decision, gross_return_pct, net_return_pct)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", all_rows)
+            conn.execute("UPDATE evaluation_runs SET completed_at=?, status='completed' WHERE run_id=?",
+                         (datetime.now(timezone.utc).isoformat(), run_id))
+        _tournament_update(running=False, stage="evaluated", symbol=None, downloaded=len(COINS),
+                           message="Historical evaluation complete. Read the locked out-of-sample results first.")
+    except Exception as exc:
+        print(f"[Tournament] evaluation failed: {exc}", flush=True)
+        _tournament_update(running=False, stage="error", error=str(exc)[:500], message="Historical evaluation failed; no live signal was created.")
+
+
+def get_tournament_summary():
+    try:
+        init_tournament_db()
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            ingest = conn.execute("SELECT symbol, candle_count, gap_count, first_open_time, last_open_time FROM ingestion_status ORDER BY symbol").fetchall()
+            run = conn.execute("SELECT run_id, completed_at FROM evaluation_runs WHERE status='completed' ORDER BY completed_at DESC LIMIT 1").fetchone()
+            results = [] if not run else conn.execute("""SELECT split, rule_name, COUNT(*),
+                SUM(CASE WHEN decision IN ('LONG','SHORT') THEN 1 ELSE 0 END),
+                AVG(net_return_pct), SUM(net_return_pct)
+                FROM evaluation_results WHERE run_id=? GROUP BY split, rule_name ORDER BY split, rule_name""", (run[0],)).fetchall()
+        methods = []
+        for split, rule, periods, traded, average_net, total_net in results:
+            methods.append({"split": split, "rule": rule, "periods": periods, "traded": traded,
+                            "coverage_pct": round(traded / periods * 100, 1) if periods else 0.0,
+                            "avg_net_return_pct": round(average_net or 0.0, 3), "total_net_return_pct": round(total_net or 0.0, 3)})
+        with tournament_lock:
+            state = dict(tournament_state)
+        return {"state": state, "data": [{"symbol": r[0], "candles": r[1], "gaps": r[2], "first": r[3], "last": r[4]} for r in ingest],
+                "latest_run": None if not run else {"run_id": run[0], "completed_at": run[1]}, "methods": methods,
+                "plain_rule": "Only the locked out-of-sample rows are decision evidence. A positive historical number is not a promise of future profit."}
+    except Exception as exc:
+        return {"state": {"running": False, "stage": "error", "message": "Tournament status unavailable.", "error": str(exc)}, "data": [], "methods": [], "latest_run": None,
+                "plain_rule": "No historical evaluation is available."}
 
 
 # ── Find safe lookback ─────────────────────────────────────────────────────────
@@ -2000,6 +2226,28 @@ def accuracy_route():
 @app.route("/research-comparison")
 def research_comparison_route():
     return jsonify(get_research_model_comparison())
+
+@app.route("/tournament/status")
+def tournament_status_route():
+    return jsonify(get_tournament_summary())
+
+@app.route("/tournament/download", methods=["POST"])
+def tournament_download_route():
+    with tournament_lock:
+        if tournament_state["running"]:
+            return jsonify({"status": "already_running", "message": tournament_state["message"]}), 409
+        tournament_state["running"] = True
+    threading.Thread(target=download_tournament_history, daemon=True).start()
+    return jsonify({"status": "started", "message": "Downloading separate, closed hourly historical data."})
+
+@app.route("/tournament/evaluate", methods=["POST"])
+def tournament_evaluate_route():
+    with tournament_lock:
+        if tournament_state["running"]:
+            return jsonify({"status": "already_running", "message": tournament_state["message"]}), 409
+        tournament_state["running"] = True
+    threading.Thread(target=evaluate_tournament_history, daemon=True).start()
+    return jsonify({"status": "started", "message": "Evaluating fixed rules without live-trading output."})
 
 @app.route("/prediction-audit/<symbol>")
 def prediction_audit_route(symbol):

@@ -48,7 +48,7 @@ TOURNAMENT_START_ISO = os.environ.get("KRONOS_TOURNAMENT_START", "2023-01-01T00:
 TOURNAMENT_HORIZON_HOURS = 24
 TOURNAMENT_STEP_HOURS = 24
 TOURNAMENT_HOLDOUT_FRACTION = 0.30
-TOURNAMENT_MIN_HISTORY_HOURS = 168
+TOURNAMENT_MIN_HISTORY_HOURS = 240
 TOURNAMENT_MIN_OUT_OF_SAMPLE_PERIODS = 200
 TOURNAMENT_MIN_OUT_OF_SAMPLE_TRADES = 100
 TOURNAMENT_MAX_DRAWDOWN_PCT = -20.0
@@ -971,25 +971,66 @@ def download_tournament_history():
         _tournament_update(running=False, stage="error", error=str(exc)[:500], message="Historical download failed; no evaluation was run.")
 
 
-def _historical_rule_decision(closes, index, rule_name):
-    """Fixed rules declared before evaluation; only observations at/index before t are used."""
-    price = closes[index]
-    move_24 = price / closes[index - 24] - 1
-    sma_72 = float(np.mean(closes[index - 71:index + 1]))
+def _historical_features(candles):
+    """Past-only features. Rolling windows are shifted where a breakout needs prior data."""
+    frame = pd.DataFrame(candles, columns=["open_time_ms", "open", "high", "low", "close", "volume"])
+    close = frame["close"]
+    frame["ema50"] = close.ewm(span=50, adjust=False).mean()
+    frame["ema200"] = close.ewm(span=200, adjust=False).mean()
+    frame["sma72"] = close.rolling(72).mean()
+    frame["prior_high_48"] = frame["high"].shift(1).rolling(48).max()
+    frame["prior_low_48"] = frame["low"].shift(1).rolling(48).min()
+    frame["volume_sma20"] = frame["volume"].rolling(20).mean()
+    delta = close.diff()
+    gains = delta.clip(lower=0).ewm(alpha=1 / 14, adjust=False).mean()
+    losses = (-delta.clip(upper=0)).ewm(alpha=1 / 14, adjust=False).mean()
+    frame["rsi14"] = 100 - (100 / (1 + gains / (losses + 1e-12)))
+    frame["return_24"] = close.pct_change(24)
+    frame["hourly_vol_24"] = close.pct_change().rolling(24).std()
+    return frame
+
+
+def _historical_rule_decision(features, index, rule_name):
+    """Fixed, documented candidate rules using only facts available at hour t."""
+    row = features.iloc[index]
+    price, ema50, ema200 = row["close"], row["ema50"], row["ema200"]
+    move_24, sma72 = row["return_24"], row["sma72"]
     if rule_name == "no_trade":
         return "NO_TRADE"
     if rule_name == "momentum_24":
         return "LONG" if move_24 >= 0.01 else "SHORT" if move_24 <= -0.01 else "NO_TRADE"
     if rule_name == "trend_momentum":
-        if move_24 >= 0.01 and price > sma_72:
+        if move_24 >= 0.01 and price > sma72:
             return "LONG"
-        if move_24 <= -0.01 and price < sma_72:
+        if move_24 <= -0.01 and price < sma72:
+            return "SHORT"
+        return "NO_TRADE"
+    if rule_name == "ema_trend_pullback":
+        if ema50 > ema200 and price > ema50 and 40 <= row["rsi14"] <= 55:
+            return "LONG"
+        if ema50 < ema200 and price < ema50 and 45 <= row["rsi14"] <= 60:
+            return "SHORT"
+        return "NO_TRADE"
+    if rule_name == "breakout_volume":
+        if ema50 > ema200 and price > row["prior_high_48"] and row["volume"] >= 1.25 * row["volume_sma20"]:
+            return "LONG"
+        if ema50 < ema200 and price < row["prior_low_48"] and row["volume"] >= 1.25 * row["volume_sma20"]:
+            return "SHORT"
+        return "NO_TRADE"
+    if rule_name == "trend_momentum_low_vol":
+        if not (0.001 <= row["hourly_vol_24"] <= 0.03):
+            return "NO_TRADE"
+        if ema50 > ema200 and move_24 >= 0.01:
+            return "LONG"
+        if ema50 < ema200 and move_24 <= -0.01:
             return "SHORT"
         return "NO_TRADE"
     raise ValueError(f"Unknown historical rule {rule_name}")
 
 
-def _evaluate_tournament_rule(run_id, symbol, times, closes, split, start_index, end_index, rule_name):
+def _evaluate_tournament_rule(run_id, symbol, features, split, start_index, end_index, rule_name):
+    times = features["open_time_ms"].astype(int).tolist()
+    closes = features["close"].to_numpy(dtype=float)
     rows = []
     for index in range(start_index, end_index + 1, TOURNAMENT_STEP_HOURS):
         # A rule may only use candles up to index.  Exclude any discontinuous
@@ -998,7 +1039,7 @@ def _evaluate_tournament_rule(run_id, symbol, times, closes, split, start_index,
         if len(window_times) != TOURNAMENT_MIN_HISTORY_HOURS + TOURNAMENT_HORIZON_HOURS + 1 or any(
                 after - before != 3_600_000 for before, after in zip(window_times, window_times[1:])):
             continue
-        decision = _historical_rule_decision(closes, index, rule_name)
+        decision = _historical_rule_decision(features, index, rule_name)
         raw_move = (closes[index + TOURNAMENT_HORIZON_HOURS] / closes[index] - 1) * 100
         gross = raw_move if decision == "LONG" else -raw_move if decision == "SHORT" else 0.0
         net = gross - ROUND_TRIP_COST_PCT if decision in ("LONG", "SHORT") else 0.0
@@ -1019,7 +1060,8 @@ def evaluate_tournament_history():
         run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
         config = {"horizon_hours": TOURNAMENT_HORIZON_HOURS, "step_hours": TOURNAMENT_STEP_HOURS,
                   "holdout_fraction": TOURNAMENT_HOLDOUT_FRACTION, "round_trip_cost_pct": ROUND_TRIP_COST_PCT,
-                  "rules": ["no_trade", "momentum_24", "trend_momentum"]}
+                  "rules": ["no_trade", "momentum_24", "trend_momentum", "ema_trend_pullback",
+                            "breakout_volume", "trend_momentum_low_vol"]}
         with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
             conn.execute("INSERT INTO evaluation_runs (run_id, started_at, config_json, status) VALUES (?, ?, ?, ?)",
                          (run_id, datetime.now(timezone.utc).isoformat(), json.dumps(config), "running"))
@@ -1028,16 +1070,16 @@ def evaluate_tournament_history():
         all_rows = []
         for coin_index, symbol in enumerate(COINS):
             with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
-                candles = conn.execute("SELECT open_time_ms, close FROM candles WHERE symbol=? ORDER BY open_time_ms", (symbol,)).fetchall()
-            times = [int(row[0]) for row in candles]
-            closes = np.asarray([float(row[1]) for row in candles], dtype=float)
+                candles = conn.execute("SELECT open_time_ms, open, high, low, close, volume FROM candles WHERE symbol=? ORDER BY open_time_ms", (symbol,)).fetchall()
+            features = _historical_features(candles)
+            closes = features["close"].to_numpy(dtype=float)
             if len(closes) < TOURNAMENT_MIN_HISTORY_HOURS + TOURNAMENT_HORIZON_HOURS + 48:
                 continue
             split_index = int(len(closes) * (1 - TOURNAMENT_HOLDOUT_FRACTION))
             for rule_name in config["rules"]:
-                all_rows.extend(_evaluate_tournament_rule(run_id, symbol, times, closes, "in_sample",
+                all_rows.extend(_evaluate_tournament_rule(run_id, symbol, features, "in_sample",
                     TOURNAMENT_MIN_HISTORY_HOURS, split_index - TOURNAMENT_HORIZON_HOURS, rule_name))
-                all_rows.extend(_evaluate_tournament_rule(run_id, symbol, times, closes, "out_of_sample",
+                all_rows.extend(_evaluate_tournament_rule(run_id, symbol, features, "out_of_sample",
                     split_index, len(closes) - TOURNAMENT_HORIZON_HOURS - 1, rule_name))
             _tournament_update(symbol=symbol, downloaded=coin_index + 1, total=len(COINS),
                                message=f"Evaluated {symbol} using only information available at each historical hour…")

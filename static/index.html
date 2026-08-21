@@ -1299,10 +1299,16 @@ function loadTournamentStatus() {
         var average = Number(row.avg_net_return_pct || 0);
         var lower = row.lower_net_return_bound_pct == null ? '—' : (Number(row.lower_net_return_bound_pct) >= 0 ? '+' : '') + Number(row.lower_net_return_bound_pct).toFixed(3) + '%';
         var winRate = row.win_rate_pct == null ? '—' : Number(row.win_rate_pct).toFixed(1) + '%';
+        var isReference = row.rule === 'no_trade';
+        var simpleStatus = row.simple_status || (row.validated ? 'HISTORICALLY ELIGIBLE' : 'NO TRADE');
+        var score = row.evidence_score == null ? '—' : row.evidence_score + ' / 100';
+        var color = row.validated ? 'var(--green)' : isReference ? 'var(--muted2)' : 'var(--red)';
+        var reasons = (row.simple_reasons || []).map(function(reason) { return escapeHtml(reason); }).join(' ');
         return '<div class="research-model">' +
           '<div class="research-model-name">' + currentCoin + ' locked later-period: ' + escapeHtml(tournamentRuleName(row.rule)) + '</div>' +
-          '<div class="research-model-metric" style="color:' + (row.validated ? 'var(--green)' : 'var(--muted2)') + '">' +
-            (average >= 0 ? '+' : '') + average.toFixed(3) + '% avg net / period</div>' +
+          '<div class="research-model-metric" style="color:' + color + '">' + escapeHtml(simpleStatus) + (isReference ? '' : ' · ' + score) + '</div>' +
+          '<div class="research-model-note" style="color:' + color + '">' + reasons + '</div>' +
+          '<div class="research-model-note">Measured average: ' + (average >= 0 ? '+' : '') + average.toFixed(3) + '% net per 24h period.</div>' +
           '<div class="research-model-note">' + row.traded + ' trades across ' + row.periods + ' non-overlapping 24h periods (' + row.coverage_pct + '% coverage) · win rate ' + winRate + ' · cautious lower bound ' + lower + ' · worst drawdown ' + Number(row.max_drawdown_pct).toFixed(2) + '%.</div>' +
           '<div class="research-model-note">' + (row.validated ? 'Passed the historical gate only; it still needs a separate live-market setup check.' : 'Did not pass the historical gate. It cannot produce a live trading signal.') + '</div></div>';
       }).join('') : '';

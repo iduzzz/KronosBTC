@@ -1,5 +1,8 @@
-import os, sys, time, threading, traceback, json, queue, sqlite3, re
+import os, sys, time, threading, traceback, json, queue, sqlite3, re, html
 from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
+from urllib.parse import urlparse
+from xml.etree import ElementTree as ET
 import numpy as np
 import pandas as pd
 import requests
@@ -102,6 +105,13 @@ tournament_state = {"running": False, "stage": "not_started", "message": "Histor
                     "symbol": None, "downloaded": 0, "total": 0, "updated_at": None, "error": None}
 experimental_lock = threading.Lock()
 experimental_state = {"running": False, "message": "No experimental market check has been recorded yet.", "error": None}
+news_lock = threading.Lock()
+news_cache = {"items": {}, "updated_at": None, "error": None}
+NEWS_CACHE_SECS = 15 * 60
+NEWS_SYMBOL_QUERIES = {
+    "ZEC": 'Zcash OR ZEC cryptocurrency',
+    "TAO": 'Bittensor OR TAO cryptocurrency',
+}
 
 
 def _request_with_retry(url, *, params=None, headers=None, timeout=(3, 12), retries=2):
@@ -118,6 +128,65 @@ def _request_with_retry(url, *, params=None, headers=None, timeout=(3, 12), retr
         if attempt < retries:
             time.sleep(0.75 * (attempt + 1))
     raise RuntimeError(f"Request failed for {url}: {last_error}")
+
+
+def _news_context_label(title):
+    """A transparent headline tag, deliberately not a price or trade prediction."""
+    text = title.lower()
+    risk_words = ("hack", "exploit", "breach", "lawsuit", "investigation", "ban", "delist", "outage", "attack", "vulnerability", "fine")
+    positive_words = ("launch", "upgrade", "partnership", "approval", "investment", "funding", "adoption", "integration", "listing", "treasury")
+    if any(word in text for word in risk_words):
+        return "RISK CONTEXT"
+    if any(word in text for word in positive_words):
+        return "DEVELOPMENT CONTEXT"
+    return "MARKET CONTEXT"
+
+
+def _fetch_news_for_symbol(symbol):
+    query = NEWS_SYMBOL_QUERIES[symbol]
+    response = _request_with_retry(
+        "https://news.google.com/rss/search",
+        params={"q": query, "hl": "en-US", "gl": "US", "ceid": "US:en"},
+        headers={"User-Agent": "KronosBTC-Research/1.0"}, timeout=(3, 10), retries=1)
+    root = ET.fromstring(response.content)
+    items = []
+    for node in root.findall("./channel/item")[:6]:
+        title = html.unescape((node.findtext("title") or "Untitled").strip())
+        link = (node.findtext("link") or "").strip()
+        if urlparse(link).scheme not in {"http", "https"}:
+            continue
+        source = html.unescape((node.findtext("source") or "News source").strip())
+        published = (node.findtext("pubDate") or "").strip()
+        try:
+            published_at = parsedate_to_datetime(published).astimezone(timezone.utc).isoformat()
+        except (TypeError, ValueError):
+            published_at = None
+        items.append({"title": title, "source": source, "url": link,
+                      "published_at": published_at, "context": _news_context_label(title)})
+    return items
+
+
+def get_news_context(force=False):
+    """Return recent third-party headlines for reading, never as a signal input."""
+    now = time.monotonic()
+    with news_lock:
+        cached = dict(news_cache)
+        fresh = cached["updated_at"] and now - cached["updated_at"] < NEWS_CACHE_SECS
+    if fresh and not force:
+        return {"items": cached["items"], "cached": True, "error": cached["error"],
+                "note": "Headlines are reading context only. They do not affect any score or trading decision."}
+    try:
+        items = {symbol: _fetch_news_for_symbol(symbol) for symbol in NEWS_SYMBOL_QUERIES}
+        with news_lock:
+            news_cache.update({"items": items, "updated_at": now, "error": None})
+        return {"items": items, "cached": False, "error": None,
+                "note": "Headlines are reading context only. Labels describe words in the headline, not likely price direction."}
+    except Exception as exc:
+        with news_lock:
+            news_cache["error"] = str(exc)[:240]
+            fallback = dict(news_cache["items"])
+        return {"items": fallback, "cached": bool(fallback), "error": str(exc)[:240],
+                "note": "News could not be refreshed. No headline should be treated as a trading signal."}
 
 
 def _invalidate_stats_cache():
@@ -2483,6 +2552,11 @@ def experimental_run_all_route():
         experimental_state["running"] = True
     threading.Thread(target=run_experimental_checks, daemon=True).start()
     return jsonify({"status": "started", "message": "Recording test-only market observations for all coins."})
+
+@app.route("/news-context")
+def news_context_route():
+    # This is intentionally read-only and separate from every model/score path.
+    return jsonify(get_news_context(force=request.args.get("refresh") == "1"))
 
 @app.route("/prediction-audit/<symbol>")
 def prediction_audit_route(symbol):

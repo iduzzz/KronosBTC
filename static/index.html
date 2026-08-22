@@ -800,6 +800,7 @@ function showCoinState() {
   var newsPanel = document.getElementById('newsPanel');
   var historicalPanel = document.getElementById('historicalPanel');
   if (experimentalPanel && newsPanel) newsPanel.parentNode.insertBefore(experimentalPanel, newsPanel);
+  if (experimentalPanel && historicalPanel) experimentalPanel.parentNode.insertBefore(historicalPanel, experimentalPanel.nextSibling);
   document.getElementById('results').classList.remove('hidden');
   document.getElementById('updatedTime').style.display = 'none';
   loadNewsContext(false);
@@ -1389,6 +1390,16 @@ function tournamentRuleName(rule) {
          rule === 'trend_momentum_low_vol' ? 'Trend + momentum + volatility rule' : rule;
 }
 
+function tournamentRulePlain(rule) {
+  return rule === 'no_trade' ? 'It never opens a position. It is only the safe comparison point.' :
+         rule === 'momentum_24' ? 'It would follow the direction of the previous 24 hours.' :
+         rule === 'trend_momentum' ? 'It would trade only when the longer trend and recent direction agree.' :
+         rule === 'ema_trend_pullback' ? 'It would look for a pullback while the longer trend is still intact.' :
+         rule === 'breakout_volume' ? 'It would look for a new 48-hour high or low confirmed by volume.' :
+         rule === 'trend_momentum_low_vol' ? 'It would require trend and momentum agreement while avoiding high-volatility conditions.' :
+         'This is a fixed historical rule.';
+}
+
 function loadTournamentStatus() {
   fetch(BASE + '/tournament/status')
     .then(function(r) { return r.json(); })
@@ -1432,17 +1443,21 @@ function loadTournamentStatus() {
         var lower = row.lower_net_return_bound_pct == null ? '—' : (Number(row.lower_net_return_bound_pct) >= 0 ? '+' : '') + Number(row.lower_net_return_bound_pct).toFixed(3) + '%';
         var winRate = row.win_rate_pct == null ? '—' : Number(row.win_rate_pct).toFixed(1) + '%';
         var isReference = row.rule === 'no_trade';
-        var simpleStatus = row.simple_status || (row.validated ? 'HISTORICALLY ELIGIBLE' : 'NO TRADE');
+        var simpleStatus = isReference ? 'COMPARISON ONLY' : (row.validated ? 'HISTORICALLY ELIGIBLE' : 'NOT SAFE ENOUGH TO USE');
         var score = row.evidence_score == null ? '—' : row.evidence_score + ' / 100';
         var color = row.validated ? 'var(--green)' : isReference ? 'var(--muted2)' : 'var(--red)';
         var reasons = (row.simple_reasons || []).map(function(reason) { return escapeHtml(reason); }).join(' ');
+        var tradeNeed = row.traded < 100 ? 'It produced only ' + row.traded + ' trades; at least 100 are required for enough evidence.' : '';
+        var outcome = isReference ? 'This is not a strategy; it simply shows what happens when no trade is made.' :
+          (row.validated ? 'This rule passed the historical gate. It still needs a separate current-market check.' : 'This rule failed the historical safety gate, so the app will not use it as a signal.');
         return '<div class="research-model">' +
-          '<div class="research-model-name">' + currentCoin + ' locked later-period: ' + escapeHtml(tournamentRuleName(row.rule)) + '</div>' +
+          '<div class="research-model-name">' + escapeHtml(tournamentRuleName(row.rule)) + '</div>' +
+          '<div class="research-model-note" style="margin-top:7px"><strong>What it tries:</strong> ' + escapeHtml(tournamentRulePlain(row.rule)) + '</div>' +
           '<div class="research-model-metric" style="color:' + color + '">' + escapeHtml(simpleStatus) + (isReference ? '' : ' · ' + score) + '</div>' +
-          '<div class="research-model-note" style="color:' + color + '">' + reasons + '</div>' +
-          '<div class="research-model-note">Measured average: ' + (average >= 0 ? '+' : '') + average.toFixed(3) + '% net per 24h period.</div>' +
-          '<div class="research-model-note">' + row.traded + ' trades across ' + row.periods + ' non-overlapping 24h periods (' + row.coverage_pct + '% coverage) · win rate ' + winRate + ' · cautious lower bound ' + lower + ' · worst drawdown ' + Number(row.max_drawdown_pct).toFixed(2) + '%.</div>' +
-          '<div class="research-model-note">' + (row.validated ? 'Passed the historical gate only; it still needs a separate live-market setup check.' : 'Did not pass the historical gate. It cannot produce a live trading signal.') + '</div></div>';
+          '<div class="research-model-note" style="color:' + color + '"><strong>Simple result:</strong> ' + escapeHtml(outcome) + '</div>' +
+          (tradeNeed ? '<div class="research-model-note" style="color:' + color + '"><strong>Main evidence issue:</strong> ' + escapeHtml(tradeNeed) + '</div>' : '') +
+          (reasons ? '<details style="margin-top:8px"><summary style="cursor:pointer;color:var(--accent2);font-size:10px;font-weight:700">Show technical details</summary><div class="research-model-note" style="margin-top:6px"><strong>Why it did not pass:</strong> ' + reasons + '</div><div class="research-model-note">Average after costs: ' + (average >= 0 ? '+' : '') + average.toFixed(3) + '% per 24h test · win rate: ' + winRate + ' · cautious estimate: ' + lower + ' · worst historical drop: ' + Number(row.max_drawdown_pct).toFixed(2) + '%.</div><div class="research-model-note">It traded ' + row.traded + ' times across ' + row.periods + ' separate 24-hour tests.</div></details>' : '') +
+          '</div>';
       }).join('') : '';
       if (running) setTimeout(loadTournamentStatus, 2500);
     })

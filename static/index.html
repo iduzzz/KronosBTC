@@ -797,8 +797,9 @@ function showCoinState() {
   });
   stopTimer();
   var experimentalPanel = document.getElementById('experimentalPanel');
+  var newsPanel = document.getElementById('newsPanel');
   var historicalPanel = document.getElementById('historicalPanel');
-  if (experimentalPanel && historicalPanel) historicalPanel.parentNode.insertBefore(experimentalPanel, historicalPanel);
+  if (experimentalPanel && newsPanel) newsPanel.parentNode.insertBefore(experimentalPanel, newsPanel);
   document.getElementById('results').classList.remove('hidden');
   document.getElementById('updatedTime').style.display = 'none';
   loadNewsContext(false);

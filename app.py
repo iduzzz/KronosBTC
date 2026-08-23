@@ -1433,19 +1433,6 @@ def kronos_predict(df, symbol="UNK", pred_len=24):
     )
     y_timestamp = pd.Series(future_times).reset_index(drop=True)
 
-    # #7: One greedy path (T=0.1, near-deterministic) for mean forecast
-    greedy_close = None
-    try:
-        with torch.inference_mode():
-            p_greedy = predictor.predict(
-                df=x_df, x_timestamp=x_timestamp, y_timestamp=y_timestamp,
-                pred_len=pred_len, T=0.1, top_p=1.0, sample_count=1
-            )
-        greedy_close = p_greedy["close"].values
-        print(f"[Kronos] {symbol} greedy path done.", flush=True)
-    except Exception as e:
-        print(f"[Kronos] {symbol} greedy path failed ({e}), using MC mean.", flush=True)
-
     # N=100 MC paths at T=0.7 for uncertainty (P10/P90)
     all_closes = []
     run_times  = []
@@ -2362,6 +2349,8 @@ def predict(symbol):
     symbol = symbol.upper()
     if symbol not in COINS:
         return jsonify({"error": f"Unknown symbol {symbol}"}), 400
+    if not KRONOS_CANDIDATE_RULE_ENABLED:
+        return jsonify({"error": "Kronos forecasting is disabled while research evidence remains insufficient. Use the daily Prototype Data Collector instead."}), 403
     if not model_ready:
         return jsonify({"error": "Model not loaded yet."}), 503
     with cache_lock:

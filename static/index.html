@@ -227,7 +227,6 @@ canvas{width:100%!important;height:100%!important}
   <span class="coin-btn" onclick="selectCoin('TAO')" id="btn-TAO">TAO</span>
   <span class="coin-btn" onclick="selectCoin('ETH')" id="btn-ETH">ETH</span>
   <span class="coin-btn" onclick="selectCoin('SOL')" id="btn-SOL">SOL</span>
-  <span class="coin-btn" onclick="refreshAll()" id="btn-all" style="border-color:var(--purple);color:var(--purple)">All</span>
 </div>
 
 <div class="price-bar">
@@ -258,7 +257,7 @@ canvas{width:100%!important;height:100%!important}
   <div class="computing-card" id="computingCard">
     <div class="computing-icon">🧠</div>
     <div class="computing-title" id="computingTitle">Computing Prediction</div>
-    <div class="computing-sub">Running Kronos-base N=100 + greedy path + ETF flows + funding rates + on-chain data</div>
+    <div class="computing-sub">Research task in progress. Live Kronos forecast signals remain disabled.</div>
     <div class="prog-bg"><div class="prog-fill" id="progFill"></div></div>
     <div class="prog-label" id="computingLabel">Please wait...</div>
     <div class="timer-box">
@@ -1616,29 +1615,6 @@ function drawChart(d) {
   ctx.fillStyle='rgba(245,158,11,.9)';ctx.fillText('Forecast',nx+4,H-p.b+13);
 }
 
-function refreshAll() {
-  var btn = document.getElementById('btn-all');
-  if (btn) { btn.textContent = 'Queuing...'; btn.style.pointerEvents = 'none'; }
-  var queued = 0;
-  COINS.forEach(function(c, i) {
-    setTimeout(function() {
-      fetch(BASE + '/predict/' + c)
-        .then(function(r) { return r.json(); })
-        .then(function() {
-          queued++;
-          if (queued === COINS.length) {
-            if (btn) { btn.innerHTML = 'All'; btn.style.pointerEvents = 'auto'; }
-            selectCoin('BTC');
-            fetch(BASE + '/status')
-              .then(function(r2) { return r2.json(); })
-              .then(function(s) { statusData = s; updateCoinButtons(); showCoinState(); })
-              .catch(function(){});
-          }
-        }).catch(function(){});
-    }, i * 300);
-  });
-}
-
 function saveCapital() {
   var val = parseInt(document.getElementById('capitalInput').value);
   if (val >= 100) {
@@ -2051,6 +2027,10 @@ checkStatus();
     <!-- Log New Trade -->
     <div style="background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:14px">
       <div style="font-size:13px;font-weight:700;margin-bottom:10px">Log New Trade</div>
+      <div style="background:rgba(245,158,11,.10);border:1px solid rgba(245,158,11,.55);border-radius:9px;padding:10px;margin-bottom:12px;font-size:11px;line-height:1.5;color:var(--text)">
+        <strong style="color:var(--orange)">Important:</strong> This app has no validated live trading rule. The journal records your own completed decision; it is not a buy, sell, long, short, or position-size recommendation.
+        <label style="display:flex;gap:7px;align-items:flex-start;margin-top:8px;cursor:pointer"><input type="checkbox" id="jResearchAck" style="margin-top:2px"> <span>I understand this is my own decision and not an app recommendation.</span></label>
+      </div>
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
         <div>
           <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Coin</div>
@@ -2120,6 +2100,8 @@ function showJournal() {
   document.getElementById('jEntryTime').value = now.toISOString().slice(0,16);
   var ct = document.getElementById('closeExitTime');
   if (ct) ct.value = now.toISOString().slice(0,16);
+  var ack = document.getElementById('jResearchAck');
+  if (ack) ack.checked = false;
   document.getElementById('journalOverlay').style.display = 'block';
   loadJournal();
 }
@@ -2216,16 +2198,21 @@ function logTrade() {
   var amt   = parseFloat(document.getElementById('jAmount').value);
   var time  = document.getElementById('jEntryTime').value;
   var notes = document.getElementById('jNotes').value;
+  var acknowledged = document.getElementById('jResearchAck').checked;
   var msgEl = document.getElementById('jLogMsg');
 
   if (!price || !amt || price<=0 || amt<=0) {
     msgEl.textContent='Please enter valid entry price and amount.';
     msgEl.style.color='var(--red)'; msgEl.style.display='block'; return;
   }
+  if (!acknowledged) {
+    msgEl.textContent='Please confirm that this journal is not a trading recommendation.';
+    msgEl.style.color='var(--orange)'; msgEl.style.display='block'; return;
+  }
   fetch(BASE+'/real_trades/open', {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({symbol:coin,direction:dir,entry_price:price,
-      amount_usd:amt,entry_time:new Date(time).toISOString(),notes:notes})
+      amount_usd:amt,entry_time:new Date(time).toISOString(),notes:notes,research_acknowledged:true})
   }).then(function(r){ return r.json(); })
     .then(function(d) {
       if (d.status==='ok') {

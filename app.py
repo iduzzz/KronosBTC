@@ -1,6 +1,7 @@
-import os, sys, time, threading, traceback, json, queue, sqlite3, re, html
+import os, sys, time, threading, traceback, json, queue, sqlite3, re, html, logging
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
+from logging.handlers import RotatingFileHandler
 from urllib.parse import urlparse
 from xml.etree import ElementTree as ET
 import numpy as np
@@ -35,6 +36,18 @@ from model import Kronos, KronosTokenizer, KronosPredictor
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 app      = Flask(__name__, static_folder=os.path.join(BASE_DIR, 'static'))
+LOG_FILE = os.path.join(BASE_DIR, "kronos.log")
+log = logging.getLogger("kronos")
+if not log.handlers:
+    log.setLevel(logging.INFO)
+    log.propagate = False
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    file_handler = RotatingFileHandler(LOG_FILE, maxBytes=2_000_000, backupCount=3, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    log.addHandler(console_handler)
+    log.addHandler(file_handler)
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 MODEL_NAME     = "NeoQuasar/Kronos-base"
@@ -127,6 +140,7 @@ def _request_with_retry(url, *, params=None, headers=None, timeout=(3, 12), retr
             last_error = exc
         if attempt < retries:
             time.sleep(0.75 * (attempt + 1))
+    log.warning("Read-only external request failed after %s attempts: %s (%s)", retries + 1, url, last_error)
     raise RuntimeError(f"Request failed for {url}: {last_error}")
 
 
@@ -182,6 +196,7 @@ def get_news_context(force=False):
         return {"items": items, "cached": False, "error": None,
                 "note": "Headlines are reading context only. Labels describe words in the headline, not likely price direction."}
     except Exception as exc:
+        log.warning("News refresh failed: %s", exc)
         with news_lock:
             news_cache["error"] = str(exc)[:240]
             fallback = dict(news_cache["items"])
@@ -830,7 +845,8 @@ def fetch_fear_greed():
         d = r.json()
         return {"value": int(d["data"][0]["value"]),
                 "label": d["data"][0]["value_classification"]}
-    except Exception:
+    except Exception as exc:
+        log.warning("Fear & Greed data unavailable: %s", exc)
         return {"value": None, "label": "N/A"}
 
 def fetch_funding_rate(symbol):
@@ -845,7 +861,7 @@ def fetch_funding_rate(symbol):
                     "Overcrowded Shorts" if rate < -0.01 else "Neutral"
             return {"rate": round(rate, 4), "avg": round(avg, 4), "label": label}
     except Exception as e:
-        print(f"[Funding] {symbol} failed: {e}", flush=True)
+        log.warning("Funding data for %s unavailable: %s", symbol, e)
     return {"rate": None, "avg": None, "label": "N/A"}
 
 def fetch_etf_flows():
@@ -865,7 +881,7 @@ def fetch_etf_flows():
                         "Outflows" if total > -300 else "Strong Outflows"
                 return {"total": total, "label": label}
     except Exception as e:
-        print(f"[ETF] Failed: {e}", flush=True)
+        log.warning("ETF flow data unavailable: %s", e)
     return {"total": None, "label": "Unavailable"}
 
 def fetch_onchain():
@@ -879,15 +895,15 @@ def fetch_onchain():
                                   "High" if s > 50000 else \
                                   "Low" if s < 5000 else "Normal"
     except Exception as e:
-        print(f"[OnChain] Failed: {e}", flush=True)
+        log.warning("On-chain data unavailable: %s", e)
     return result
 
 def fetch_btc_dominance():
     try:
         r = _request_with_retry("https://api.coingecko.com/api/v3/global")
         return round(r.json()["data"]["market_cap_percentage"]["btc"], 2)
-    except Exception:
-        pass
+    except Exception as exc:
+        log.warning("BTC dominance data unavailable: %s", exc)
     return None
 
 
@@ -1055,7 +1071,7 @@ def download_tournament_history():
         message = "History downloaded and gap-checked." if not bad else "History downloaded, but gaps were found. Evaluation will exclude affected windows."
         _tournament_update(running=False, stage="ready", symbol=None, downloaded=len(COINS), message=message)
     except Exception as exc:
-        print(f"[Tournament] download failed: {exc}", flush=True)
+        log.exception("Historical download failed")
         _tournament_update(running=False, stage="error", error=str(exc)[:500], message="Historical download failed; no evaluation was run.")
 
 
@@ -1180,7 +1196,7 @@ def evaluate_tournament_history():
         _tournament_update(running=False, stage="evaluated", symbol=None, downloaded=len(COINS),
                            message="Historical evaluation complete. Read the locked out-of-sample results first.")
     except Exception as exc:
-        print(f"[Tournament] evaluation failed: {exc}", flush=True)
+        log.exception("Historical evaluation failed")
         _tournament_update(running=False, stage="error", error=str(exc)[:500], message="Historical evaluation failed; no live signal was created.")
 
 
@@ -1263,6 +1279,7 @@ def get_tournament_summary():
                 "evidence_by_coin": evidence_by_coin,
                 "plain_rule": "Each coin is evaluated separately. Only locked out-of-sample rows count as evidence; a positive historical number is not a promise of future profit."}
     except Exception as exc:
+        log.exception("Tournament status query failed")
         return {"state": {"running": False, "stage": "error", "message": "Tournament status unavailable.", "error": str(exc)}, "data": [], "methods": [], "evidence_by_coin": {}, "latest_run": None,
                 "plain_rule": "No historical evaluation is available."}
 
@@ -1323,6 +1340,7 @@ def run_experimental_checks():
                     saved += 1
         with experimental_lock: experimental_state.update({"running": False, "message": f"Saved {saved} new 24-hour test observations. They are not trade instructions."})
     except Exception as exc:
+        log.exception("Experimental market observation run failed")
         with experimental_lock: experimental_state.update({"running": False, "error": str(exc)[:500], "message": "Experimental check failed; no observation was saved."})
 
 
@@ -1360,6 +1378,7 @@ def get_experimental_status():
                 "minimum_settled_for_calibration": 50,
                 "note": "Input Alignment is a prototype data collector, not a probability of profit or a trading instruction."}
     except Exception as exc:
+        log.exception("Experimental status query failed")
         return {"state": {"running": False, "message": "Experimental status unavailable.", "error": str(exc)}, "by_coin": {}, "note": "Unavailable."}
 
 
@@ -2424,6 +2443,8 @@ def open_real_trade():
         data       = request.get_json(silent=True)
         if not isinstance(data, dict):
             return jsonify({"error": "Invalid JSON"}), 400
+        if data.get("research_acknowledged") is not True:
+            return jsonify({"error": "Confirm that this journal does not provide a trading recommendation."}), 400
         symbol     = data["symbol"].upper()
         direction  = data["direction"].upper()
         entry_price= float(data["entry_price"])
@@ -2461,6 +2482,7 @@ def open_real_trade():
                 conn.commit()
         return jsonify({"status": "ok"})
     except Exception as e:
+        log.exception("Could not log manual real-trade journal entry")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/real_trades/close/<int:trade_id>", methods=["POST"])

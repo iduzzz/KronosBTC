@@ -890,8 +890,12 @@ function loadExperimentalStatus() {
     var state = data.state || {}, item = (data.by_coin || {})[currentCoin];
     var stats = (data.stats_by_coin || {})[currentCoin] || {};
     document.getElementById('experimentalCoin').textContent = currentCoin + '/USDT';
-    document.getElementById('experimentalStatus').textContent = state.running ? 'RECORDING' : item ? 'TEST ONLY' : 'NO SAMPLE';
-    document.getElementById('experimentalNote').textContent = data.note || state.message || '';
+    document.getElementById('experimentalStatus').textContent = state.error ? 'CHECK FAILED' : state.running ? 'RECORDING' : item ? 'TEST ONLY' : 'NO SAMPLE';
+    document.getElementById('experimentalStatus').style.color = state.error ? 'var(--red)' : state.running ? 'var(--orange)' : 'var(--orange)';
+    var savedMessage = String(state.message || '').indexOf('Saved ') === 0;
+    document.getElementById('experimentalNote').textContent = state.error
+      ? 'Daily check failed. No observation was saved. Open kronos.log for the technical error, then try again.'
+      : (state.running || savedMessage ? state.message : (data.note || state.message || ''));
     document.getElementById('experimentalScore').textContent = item ? Number(item.score).toFixed(0) + ' / 100' : '— / 100';
     document.getElementById('experimentalScore').style.color = 'var(--orange)';
     document.getElementById('experimentalBias').textContent = item ? item.bias + ' — unproven test observation' : 'Record a test observation first.';
@@ -920,6 +924,12 @@ function renderExperimentalTimer(dailyCheck, state) {
     button.disabled = true;
     return;
   }
+  if (state.error) {
+    timer.textContent = 'CHECK FAILED — no test was saved. See kronos.log, then try again.';
+    timer.style.color = 'var(--red)';
+    button.disabled = false;
+    return;
+  }
   var next = dailyCheck.next_all_check_at ? new Date(dailyCheck.next_all_check_at).getTime() : null;
   function update() {
     var remaining = next ? next - Date.now() : 0;
@@ -943,12 +953,23 @@ function renderExperimentalTimer(dailyCheck, state) {
 }
 
 function runExperimentalCheck() {
+  var button = document.getElementById('experimentalRun');
+  var timer = document.getElementById('experimentalTimer');
+  if (button.disabled) return;
+  button.disabled = true;
   document.getElementById('experimentalStatus').textContent = 'STARTING…';
+  if (timer) { timer.textContent = 'Starting today’s all-coin check…'; timer.style.color = 'var(--orange)'; }
   fetch(BASE + '/experimental/run-all', {method:'POST'}).then(function(r){
     if (!r.ok) throw new Error('Restart the app after copying the newest app.py.');
     return r.json();
-  }).then(function(){ loadExperimentalStatus(); })
-    .catch(function(error){ document.getElementById('experimentalStatus').textContent = 'RESTART REQUIRED'; document.getElementById('experimentalNote').textContent = error.message; });
+  }).then(function(){ setTimeout(loadExperimentalStatus, 500); })
+    .catch(function(error){
+      document.getElementById('experimentalStatus').textContent = 'CHECK FAILED';
+      document.getElementById('experimentalStatus').style.color = 'var(--red)';
+      document.getElementById('experimentalNote').textContent = error.message;
+      if (timer) { timer.textContent = 'CHECK FAILED — no test was saved.'; timer.style.color = 'var(--red)'; }
+      button.disabled = false;
+    });
 }
 
 function startPolling() {

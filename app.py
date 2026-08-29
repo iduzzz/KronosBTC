@@ -1374,7 +1374,22 @@ def get_experimental_status():
                           "direction_match_pct": round((correct or 0) / settled * 100, 1) if settled else None,
                           "avg_net_return_pct": round(net or 0.0, 3) if settled else None}
                  for symbol, total, settled, correct, net in stats_rows}
+        # One all-coin timer is based on the most recent saved observation among
+        # all configured coins. This remains accurate after a browser refresh.
+        observed_times = [_as_utc(item["observed_at"]).to_pydatetime() for item in latest.values()]
+        now_utc = datetime.now(timezone.utc)
+        if len(latest) < len(COINS):
+            daily_check = {"ready": True, "next_all_check_at": None,
+                           "message": "Ready now — one or more coins do not yet have a saved observation."}
+        elif observed_times:
+            next_check = max(observed_times) + pd.Timedelta(hours=24).to_pytimedelta()
+            ready = now_utc >= next_check
+            daily_check = {"ready": ready, "next_all_check_at": next_check.isoformat(),
+                           "message": "Ready for today's all-coin check." if ready else "Next all-coin check unlocks after the 24-hour timer."}
+        else:
+            daily_check = {"ready": True, "next_all_check_at": None, "message": "Ready for the first all-coin check."}
         return {"state": state, "by_coin": latest, "stats_by_coin": stats,
+                "daily_check": daily_check,
                 "minimum_settled_for_calibration": 50,
                 "note": "Input Alignment is a prototype data collector, not a probability of profit or a trading instruction."}
     except Exception as exc:

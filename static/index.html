@@ -66,6 +66,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 .timer-rem{font-size:13px;color:var(--muted2);margin-top:4px}
 .btn-predict{width:100%;padding:14px;background:linear-gradient(135deg,#2563eb,#7c3aed);color:white;border:none;border-radius:14px;font-size:15px;font-weight:700;cursor:pointer;transition:opacity 0.2s}
 .btn-predict:active{opacity:.8}
+.btn-predict:disabled{cursor:not-allowed;opacity:.55;filter:saturate(.55)}
 .metrics{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .metric{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:14px;text-align:center}
 .metric-value{font-size:26px;font-weight:800;line-height:1;margin-bottom:4px}
@@ -199,7 +200,7 @@ canvas{width:100%!important;height:100%!important}
     <div class="info-row"><span class="info-label">Lookback</span><span class="info-val">384h (16 days)</span></div>
     <div class="info-row"><span class="info-label">Refresh</span><span class="info-val">Manual only</span></div>
     <div class="info-row"><span class="info-label">Requests (24h)</span><span class="info-val" id="infoRequests">-</span></div>
-    <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">ZEC BTC TAO ETH SOL</span></div>
+    <div class="info-row" style="border:none"><span class="info-label">Coins</span><span class="info-val">ZEC BTC TAO ETH SOL XRP ADA NPC</span></div>
   </div>
   <div class="drawer-section" style="border-top:1px solid var(--border);margin-top:8px">
     <div class="drawer-section-title">Capital Settings</div>
@@ -227,6 +228,9 @@ canvas{width:100%!important;height:100%!important}
   <span class="coin-btn" onclick="selectCoin('TAO')" id="btn-TAO">TAO</span>
   <span class="coin-btn" onclick="selectCoin('ETH')" id="btn-ETH">ETH</span>
   <span class="coin-btn" onclick="selectCoin('SOL')" id="btn-SOL">SOL</span>
+  <span class="coin-btn" onclick="selectCoin('XRP')" id="btn-XRP">XRP</span>
+  <span class="coin-btn" onclick="selectCoin('ADA')" id="btn-ADA">ADA</span>
+  <span class="coin-btn" onclick="selectCoin('NPC')" id="btn-NPC">NPC</span>
 </div>
 
 <div class="price-bar">
@@ -323,6 +327,10 @@ canvas{width:100%!important;height:100%!important}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin:10px 0">
         <button class="btn-predict" id="downloadHistoryBtn" onclick="startTournamentDownload()" style="padding:8px 12px;font-size:11px">1. Download &amp; Check History</button>
         <button class="btn-predict" id="evaluateHistoryBtn" onclick="startTournamentEvaluation()" style="padding:8px 12px;font-size:11px;background:linear-gradient(135deg,#0f766e,#2563eb)">2. Run Fixed Historical Tests</button>
+      </div>
+      <div class="research-grid" style="margin:0 0 10px">
+        <div class="research-tile"><div class="research-label">Next history refresh</div><div class="research-value" id="historyRefreshTimer">Checking…</div><div class="research-detail" id="historyRefreshNote">A refresh is needed only once per month.</div></div>
+        <div class="research-tile"><div class="research-label">Fixed historical tests</div><div class="research-value" id="historyTestTimer">Checking…</div><div class="research-detail" id="historyTestNote">Run once after a history refresh.</div></div>
       </div>
       <div style="font-size:10px;color:var(--muted2);line-height:1.6;margin-bottom:10px">
         The test compares pre-defined no-trade, momentum, trend, pullback, and breakout rules with a 24-hour hold, fees, gaps excluded, and a locked later-period check. It does not create a live signal unless a rule passes every evidence gate.
@@ -629,14 +637,15 @@ canvas{width:100%!important;height:100%!important}
 
 <script>
 var BASE = window.location.origin;
-var COINS = ['ZEC','BTC','TAO','ETH','SOL'];
-var BSYMS = {ZEC:'ZECUSDT',BTC:'BTCUSDT',TAO:'TAOUSDT',ETH:'ETHUSDT',SOL:'SOLUSDT'};
+var COINS = ['ZEC','BTC','TAO','ETH','SOL','XRP','ADA','NPC'];
+var BSYMS = {ZEC:'ZECUSDT',BTC:'BTCUSDT',TAO:'TAOUSDT',ETH:'ETHUSDT',SOL:'SOLUSDT',XRP:'XRPUSDT',ADA:'ADAUSDT',NPC:'NPCUSDT'};
 var currentCoin = 'ZEC';
 var pollTimer = null;
 var statusData = {};
 var timerInterval = null;
 var timerStartedAt = null;
 var experimentalTimerInterval = null;
+var tournamentTimerInterval = null;
 var priceFrame = '24h';
 var lastPrice = 0;
 
@@ -904,7 +913,14 @@ function loadExperimentalStatus() {
       ? stats.correct + ' direction matches out of ' + stats.settled + ' settled observations (' + stats.direction_match_pct + '%) · avg test net result ' + (Number(stats.avg_net_return_pct) >= 0 ? '+' : '') + Number(stats.avg_net_return_pct).toFixed(3) + '%. Calibration needs ' + needed + ' settled observations.'
       : (stats.recorded || 0) + ' recorded; 0 settled. The first exact 24-hour outcome is still pending.';
     document.getElementById('experimentalIngredients').textContent = item ? (item.components || []).join(' · ') : '—';
-    renderExperimentalTimer(data.daily_check || {}, state);
+    if (!data.daily_check || typeof data.daily_check.ready !== 'boolean') {
+      document.getElementById('experimentalStatus').textContent = 'RESTART REQUIRED';
+      document.getElementById('experimentalStatus').style.color = 'var(--orange)';
+      document.getElementById('experimentalNote').textContent = 'The running app.py is an older version and cannot provide the daily timer. Copy the newest app.py, then fully restart the Python app.';
+      renderExperimentalTimerUnavailable();
+    } else {
+      renderExperimentalTimer(data.daily_check, state);
+    }
     if (state.running) setTimeout(loadExperimentalStatus, 2500);
   }).catch(function(error) {
     document.getElementById('experimentalStatus').textContent = 'RESTART REQUIRED';
@@ -950,6 +966,14 @@ function renderExperimentalTimer(dailyCheck, state) {
   }
   update();
   if (next && next > Date.now()) experimentalTimerInterval = setInterval(update, 1000);
+}
+
+function renderExperimentalTimerUnavailable() {
+  var timer = document.getElementById('experimentalTimer');
+  var button = document.getElementById('experimentalRun');
+  if (experimentalTimerInterval) { clearInterval(experimentalTimerInterval); experimentalTimerInterval = null; }
+  if (timer) { timer.textContent = 'TIMER UNAVAILABLE — restart app.py after copying the newest version.'; timer.style.color = 'var(--orange)'; }
+  if (button) button.disabled = true;
 }
 
 function runExperimentalCheck() {
@@ -1457,6 +1481,59 @@ function tournamentRulePlain(rule) {
          'This is a fixed historical rule.';
 }
 
+function renderTournamentSchedule(schedule, running) {
+  var refreshTimer = document.getElementById('historyRefreshTimer');
+  var refreshNote = document.getElementById('historyRefreshNote');
+  var testTimer = document.getElementById('historyTestTimer');
+  var testNote = document.getElementById('historyTestNote');
+  if (!refreshTimer || !refreshNote || !testTimer || !testNote) return;
+  if (tournamentTimerInterval) { clearInterval(tournamentTimerInterval); tournamentTimerInterval = null; }
+  if (!schedule || typeof schedule.history_ready !== 'boolean') {
+    refreshTimer.textContent = 'RESTART REQUIRED';
+    refreshTimer.style.color = 'var(--orange)';
+    refreshNote.textContent = 'Copy the newest app.py and restart it to enable the monthly timer.';
+    testTimer.textContent = '—';
+    testNote.textContent = 'Timer unavailable until the app is restarted.';
+    return;
+  }
+  if (running) {
+    refreshTimer.textContent = 'WORKING…';
+    refreshTimer.style.color = 'var(--orange)';
+    refreshNote.textContent = 'Please wait for the current historical task to finish.';
+    testTimer.textContent = 'WAIT';
+    testNote.textContent = 'The current task must finish first.';
+    return;
+  }
+  var next = schedule.next_history_check_at ? new Date(schedule.next_history_check_at).getTime() : null;
+  function update() {
+    var remaining = next ? next - Date.now() : 0;
+    if (!next || remaining <= 0) {
+      refreshTimer.textContent = 'READY NOW';
+      refreshTimer.style.color = 'var(--green)';
+      refreshNote.textContent = schedule.history_message || 'Download and check history, then run the fixed tests once.';
+      if (tournamentTimerInterval) { clearInterval(tournamentTimerInterval); tournamentTimerInterval = null; }
+      return;
+    }
+    var totalSeconds = Math.ceil(remaining / 1000);
+    var days = Math.floor(totalSeconds / 86400);
+    var hours = Math.floor((totalSeconds % 86400) / 3600);
+    var minutes = Math.floor((totalSeconds % 3600) / 60);
+    refreshTimer.textContent = days + 'd ' + String(hours).padStart(2, '0') + ':' + String(minutes).padStart(2, '0');
+    refreshTimer.style.color = 'var(--accent2)';
+    refreshNote.textContent = schedule.history_message || 'Do not refresh early.';
+  }
+  update();
+  if (next && next > Date.now()) tournamentTimerInterval = setInterval(update, 1000);
+  if (schedule.run_fixed_tests_ready) {
+    testTimer.textContent = 'READY NOW';
+    testTimer.style.color = 'var(--green)';
+  } else {
+    testTimer.textContent = 'WAIT';
+    testTimer.style.color = 'var(--muted2)';
+  }
+  testNote.textContent = schedule.tests_message || 'Run once after a history refresh.';
+}
+
 function loadTournamentStatus() {
   fetch(BASE + '/tournament/status')
     .then(function(r) { return r.json(); })
@@ -1467,13 +1544,15 @@ function loadTournamentStatus() {
       var download = document.getElementById('downloadHistoryBtn');
       var evaluate = document.getElementById('evaluateHistoryBtn');
       var running = !!state.running;
+      var schedule = data.schedule || {};
       status.textContent = running ? 'WORKING' : String(state.stage || 'not_started').replace(/_/g, ' ').toUpperCase();
       status.style.color = state.stage === 'error' ? 'var(--red)' : running ? 'var(--orange)' : 'var(--accent2)';
       explanation.textContent = state.message || data.plain_rule || '';
-      download.disabled = running;
-      evaluate.disabled = running;
-      download.style.opacity = running ? '.55' : '1';
-      evaluate.style.opacity = running ? '.55' : '1';
+      download.disabled = running || schedule.history_ready === false;
+      evaluate.disabled = running || schedule.run_fixed_tests_ready === false;
+      download.style.opacity = download.disabled ? '.55' : '1';
+      evaluate.style.opacity = evaluate.disabled ? '.55' : '1';
+      renderTournamentSchedule(schedule, running);
 
       var dataEl = document.getElementById('tournamentData');
       var history = data.data || [];
@@ -2093,7 +2172,7 @@ checkStatus();
         <div>
           <div style="font-size:10px;color:var(--muted2);margin-bottom:4px">Coin</div>
           <select id="jCoin" style="width:100%;padding:8px;background:var(--bg);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:13px">
-            <option>ZEC</option><option>BTC</option><option>TAO</option><option>ETH</option><option>SOL</option>
+            <option>ZEC</option><option>BTC</option><option>TAO</option><option>ETH</option><option>SOL</option><option>XRP</option><option>ADA</option><option>NPC</option>
           </select>
         </div>
         <div>

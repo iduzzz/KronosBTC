@@ -68,6 +68,7 @@ TOURNAMENT_MIN_HISTORY_HOURS = 240
 TOURNAMENT_MIN_OUT_OF_SAMPLE_PERIODS = 200
 TOURNAMENT_MIN_OUT_OF_SAMPLE_TRADES = 100
 TOURNAMENT_MAX_DRAWDOWN_PCT = -20.0
+TOURNAMENT_REFRESH_DAYS = 30
 
 # This application is a local research tool.  It deliberately has no exchange
 # credentials or order-submission code.  Paper mode must be explicitly enabled.
@@ -93,7 +94,7 @@ KRONOS_CANDIDATE_RULE_ENABLED = False
 
 COINS = {
     "ZEC": "ZECUSDT", "BTC": "BTCUSDT", "TAO": "TAOUSDT", "ETH": "ETHUSDT",
-    "SOL": "SOLUSDT",
+    "SOL": "SOLUSDT", "XRP": "XRPUSDT", "ADA": "ADAUSDT", "NPC": "NPCUSDT",
 }
 
 predictor    = None
@@ -980,6 +981,13 @@ def init_tournament_db():
             actual_price REAL, actual_move_pct REAL, net_return_pct REAL, direction_correct INTEGER,
             PRIMARY KEY (symbol, target_at)
         )""")
+        # This records the user's once-daily all-coin check independently of
+        # whether every market was available at that moment.  It prevents a
+        # single unavailable asset from leaving the daily button unlocked.
+        conn.execute("""CREATE TABLE IF NOT EXISTS experimental_check_runs (
+            run_at TEXT PRIMARY KEY, completed_at TEXT NOT NULL,
+            saved_count INTEGER NOT NULL, unavailable_json TEXT NOT NULL
+        )""")
         for statement in (
             "ALTER TABLE experimental_observations ADD COLUMN feature_json TEXT",
             "ALTER TABLE experimental_observations ADD COLUMN test_action TEXT",
@@ -1274,9 +1282,28 @@ def get_tournament_summary():
                     "reason": f"{best['rule']} passed fixed out-of-sample gates; a separate current-market setup check is still required."}
         with tournament_lock:
             state = dict(tournament_state)
+        history_check_at = max((row[4] for row in ingest if row[4]), default=None)
+        has_history = bool(ingest)
+        if not has_history:
+            schedule = {"history_ready": True, "next_history_check_at": None,
+                        "run_fixed_tests_ready": False,
+                        "history_message": "History has not been downloaded yet.",
+                        "tests_message": "Download history first."}
+        else:
+            next_history = _as_utc(history_check_at).to_pydatetime() + pd.Timedelta(days=TOURNAMENT_REFRESH_DAYS).to_pytimedelta()
+            history_ready = datetime.now(timezone.utc) >= next_history
+            has_current_evaluation = bool(run) and _as_utc(run[1]).to_pydatetime() >= _as_utc(history_check_at).to_pydatetime()
+            schedule = {
+                "history_ready": history_ready,
+                "next_history_check_at": next_history.isoformat(),
+                "run_fixed_tests_ready": not has_current_evaluation,
+                "history_message": "History refresh is ready." if history_ready else "Next history refresh unlocks after the monthly timer.",
+                "tests_message": "Fixed tests are ready — run them once after the history download." if not has_current_evaluation else "Fixed tests are complete. They unlock after the next history refresh.",
+            }
         return {"state": state, "data": [{"symbol": r[0], "candles": r[1], "gaps": r[2], "first": r[3], "last": r[4]} for r in ingest],
                 "latest_run": None if not run else {"run_id": run[0], "completed_at": run[1]}, "methods": methods,
                 "evidence_by_coin": evidence_by_coin,
+                "schedule": schedule,
                 "plain_rule": "Each coin is evaluated separately. Only locked out-of-sample rows count as evidence; a positive historical number is not a promise of future profit."}
     except Exception as exc:
         log.exception("Tournament status query failed")
@@ -1320,25 +1347,38 @@ def _experimental_market_observation(symbol):
             "components": ingredients, "features": features, "test_action": action}
 
 
-def run_experimental_checks():
+def run_experimental_checks(run_at=None):
     try:
         init_tournament_db()
         with experimental_lock: experimental_state.update({"running": True, "error": None, "message": "Recording test-only market observations…"})
         saved = 0
+        unavailable = []
         for symbol in COINS:
-            with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
-                latest = conn.execute("SELECT observed_at FROM experimental_observations WHERE symbol=? ORDER BY observed_at DESC LIMIT 1", (symbol,)).fetchone()
-            if latest and (datetime.now(timezone.utc) - _as_utc(latest[0]).to_pydatetime()).total_seconds() < 24 * 3600:
-                continue
-            observation = _experimental_market_observation(symbol)
-            with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
-                exists = conn.execute("SELECT 1 FROM experimental_observations WHERE symbol=? AND target_at=?", (symbol, observation["target_at"])).fetchone()
-                if not exists:
-                    conn.execute("""INSERT INTO experimental_observations
-                      (symbol, observed_at, target_at, entry_price, alignment_score, bias, components_json, feature_json, test_action)
-                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", (symbol, observation["observed_at"], observation["target_at"], observation["entry_price"], observation["alignment_score"], observation["bias"], json.dumps(observation["components"]), json.dumps(observation["features"]), observation["test_action"]))
-                    saved += 1
-        with experimental_lock: experimental_state.update({"running": False, "message": f"Saved {saved} new 24-hour test observations. They are not trade instructions."})
+            try:
+                with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+                    latest = conn.execute("SELECT observed_at FROM experimental_observations WHERE symbol=? ORDER BY observed_at DESC LIMIT 1", (symbol,)).fetchone()
+                if latest and (datetime.now(timezone.utc) - _as_utc(latest[0]).to_pydatetime()).total_seconds() < 24 * 3600:
+                    continue
+                observation = _experimental_market_observation(symbol)
+                with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+                    exists = conn.execute("SELECT 1 FROM experimental_observations WHERE symbol=? AND target_at=?", (symbol, observation["target_at"])).fetchone()
+                    if not exists:
+                        conn.execute("""INSERT INTO experimental_observations
+                          (symbol, observed_at, target_at, entry_price, alignment_score, bias, components_json, feature_json, test_action)
+                          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", (symbol, observation["observed_at"], observation["target_at"], observation["entry_price"], observation["alignment_score"], observation["bias"], json.dumps(observation["components"]), json.dumps(observation["features"]), observation["test_action"]))
+                        saved += 1
+            except Exception as exc:
+                # One unavailable market must not prevent the other coins from
+                # receiving their independent, once-daily observation.
+                unavailable.append(symbol)
+                log.warning("Experimental observation unavailable for %s: %s", symbol, exc)
+        suffix = f" Unavailable this run: {', '.join(unavailable)}." if unavailable else ""
+        completed_at = datetime.now(timezone.utc).isoformat()
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            conn.execute("""INSERT OR REPLACE INTO experimental_check_runs
+                (run_at, completed_at, saved_count, unavailable_json) VALUES (?, ?, ?, ?)""",
+                         (run_at or completed_at, completed_at, saved, json.dumps(unavailable)))
+        with experimental_lock: experimental_state.update({"running": False, "message": f"Saved {saved} new 24-hour test observations. They are not trade instructions.{suffix}"})
     except Exception as exc:
         log.exception("Experimental market observation run failed")
         with experimental_lock: experimental_state.update({"running": False, "error": str(exc)[:500], "message": "Experimental check failed; no observation was saved."})
@@ -1350,7 +1390,11 @@ def get_experimental_status():
         with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
             pending = conn.execute("SELECT symbol, target_at, entry_price, alignment_score, test_action FROM experimental_observations WHERE actual_price IS NULL").fetchall()
         for symbol, target_at, entry, score, action in pending:
-            actual = fetch_exact_hourly_close(symbol, target_at)
+            try:
+                actual = fetch_exact_hourly_close(symbol, target_at)
+            except Exception as exc:
+                log.warning("Experimental settlement unavailable for %s: %s", symbol, exc)
+                continue
             if actual is not None:
                 correct = int((score >= 50 and actual > entry) or (score < 50 and actual <= entry))
                 move = (actual / entry - 1) * 100
@@ -1362,6 +1406,7 @@ def get_experimental_status():
                       test_action=?, direction_correct=? WHERE symbol=? AND target_at=?""", (actual, round(move, 4), round(net, 4), resolved_action, correct, symbol, target_at))
         with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
             rows = conn.execute("SELECT symbol, observed_at, target_at, alignment_score, bias, components_json FROM experimental_observations ORDER BY observed_at DESC").fetchall()
+            last_check = conn.execute("SELECT run_at FROM experimental_check_runs ORDER BY run_at DESC LIMIT 1").fetchone()
             stats_rows = conn.execute("""SELECT symbol, COUNT(*),
                 SUM(CASE WHEN actual_price IS NOT NULL THEN 1 ELSE 0 END),
                 SUM(CASE WHEN direction_correct=1 THEN 1 ELSE 0 END), AVG(net_return_pct)
@@ -1374,15 +1419,12 @@ def get_experimental_status():
                           "direction_match_pct": round((correct or 0) / settled * 100, 1) if settled else None,
                           "avg_net_return_pct": round(net or 0.0, 3) if settled else None}
                  for symbol, total, settled, correct, net in stats_rows}
-        # One all-coin timer is based on the most recent saved observation among
-        # all configured coins. This remains accurate after a browser refresh.
-        observed_times = [_as_utc(item["observed_at"]).to_pydatetime() for item in latest.values()]
+        # One all-coin timer is based on the user's last completed all-coin
+        # check, not on whether every individual symbol was available. This
+        # remains correct across browser refreshes and app restarts.
         now_utc = datetime.now(timezone.utc)
-        if len(latest) < len(COINS):
-            daily_check = {"ready": True, "next_all_check_at": None,
-                           "message": "Ready now — one or more coins do not yet have a saved observation."}
-        elif observed_times:
-            next_check = max(observed_times) + pd.Timedelta(hours=24).to_pytimedelta()
+        if last_check:
+            next_check = _as_utc(last_check[0]).to_pydatetime() + pd.Timedelta(hours=24).to_pytimedelta()
             ready = now_utc >= next_check
             daily_check = {"ready": ready, "next_all_check_at": next_check.isoformat(),
                            "message": "Ready for today's all-coin check." if ready else "Next all-coin check unlocks after the 24-hour timer."}
@@ -2572,11 +2614,20 @@ def experimental_status_route():
 
 @app.route("/experimental/run-all", methods=["POST"])
 def experimental_run_all_route():
+    init_tournament_db()
+    now_utc = datetime.now(timezone.utc)
     with experimental_lock:
         if experimental_state["running"]:
             return jsonify({"status": "already_running", "message": experimental_state["message"]}), 409
+        with sqlite3.connect(TOURNAMENT_DB_FILE) as conn:
+            last_check = conn.execute("SELECT run_at FROM experimental_check_runs ORDER BY run_at DESC LIMIT 1").fetchone()
+        if last_check:
+            next_check = _as_utc(last_check[0]).to_pydatetime() + pd.Timedelta(hours=24).to_pytimedelta()
+            if now_utc < next_check:
+                return jsonify({"status": "cooldown", "message": "The next all-coin check is not ready yet.",
+                                "next_all_check_at": next_check.isoformat()}), 429
         experimental_state["running"] = True
-    threading.Thread(target=run_experimental_checks, daemon=True).start()
+    threading.Thread(target=run_experimental_checks, args=(now_utc.isoformat(),), daemon=True).start()
     return jsonify({"status": "started", "message": "Recording test-only market observations for all coins."})
 
 @app.route("/news-context")

@@ -1381,6 +1381,48 @@ def _experimental_market_observation(symbol):
             "components": ingredients, "features": features, "test_action": action}
 
 
+def get_market_event_monitor(symbol):
+    """Current breakout/volatility context. It detects an event in progress,
+    never predicts the next move or authorizes a trade."""
+    if symbol not in COINS:
+        raise ValueError("Unsupported coin")
+    df = fetch_candles(symbol, "1h", 80)
+    if len(df) < 50:
+        raise RuntimeError("Not enough closed hourly candles for the event monitor")
+    close = df["close"].to_numpy(dtype=float)
+    volume = df["volume"].to_numpy(dtype=float)
+    price = float(close[-1])
+    move_4h = (price / close[-5] - 1) * 100
+    move_24h = (price / close[-25] - 1) * 100
+    prior_high_48 = float(np.max(close[-49:-1]))
+    prior_low_48 = float(np.min(close[-49:-1]))
+    volume_ratio = float(volume[-1] / max(np.mean(volume[-21:-1]), 1e-12))
+    upside_breakout = price > prior_high_48
+    downside_breakout = price < prior_low_48
+    fast_up = move_4h >= 4.0 or move_24h >= 8.0
+    fast_down = move_4h <= -4.0 or move_24h <= -8.0
+    if upside_breakout and fast_up:
+        status, color = "FAST UPSIDE MOVE DETECTED", "orange"
+    elif downside_breakout and fast_down:
+        status, color = "FAST DOWNSIDE MOVE DETECTED", "red"
+    elif upside_breakout:
+        status, color = "UPSIDE BREAKOUT WATCH", "orange"
+    elif downside_breakout:
+        status, color = "DOWNSIDE BREAKOUT WATCH", "red"
+    else:
+        status, color = "NO 48H BREAKOUT DETECTED", "muted"
+    details = [
+        f"4h move {move_4h:+.2f}%", f"24h move {move_24h:+.2f}%",
+        f"latest hourly volume {volume_ratio:.2f}× its prior 20h average",
+        "price above the prior 48h close range" if upside_breakout else
+        "price below the prior 48h close range" if downside_breakout else
+        "price remains inside the prior 48h close range",
+    ]
+    return {"symbol": symbol, "status": status, "color": color, "details": details,
+            "observed_at": datetime.now(timezone.utc).isoformat(),
+            "note": "This detects a move already under way. It is not a forecast, probability of profit, or trading instruction."}
+
+
 def run_experimental_checks(run_at=None):
     try:
         init_tournament_db()
@@ -2645,6 +2687,14 @@ def tournament_evaluate_route():
 @app.route("/experimental/status")
 def experimental_status_route():
     return jsonify(get_experimental_status())
+
+@app.route("/market-event/<symbol>")
+def market_event_route(symbol):
+    try:
+        return jsonify(get_market_event_monitor(symbol.upper()))
+    except Exception as exc:
+        log.warning("Market event monitor unavailable for %s: %s", symbol, exc)
+        return jsonify({"error": "Current event monitor data is unavailable."}), 503
 
 @app.route("/experimental/run-all", methods=["POST"])
 def experimental_run_all_route():

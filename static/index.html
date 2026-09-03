@@ -287,16 +287,16 @@ canvas{width:100%!important;height:100%!important}
       <span class="badge badge-orange hidden" id="refreshBadge"><div class="spinner"></div> Refreshing...</span>
     </div>
 
-    <section class="research-panel" id="newsPanel" aria-label="ZEC and TAO news context" style="border-color:rgba(168,85,247,.7)">
+    <section class="research-panel" id="newsPanel" aria-label="Trusted ZEC and TAO news" style="border-color:rgba(168,85,247,.7)">
       <div class="research-head">
         <div>
-          <div class="research-title">📰 ZEC &amp; TAO News Context</div>
-          <div class="research-sub" id="newsNote">Recent headlines for reading context. They do not change any score or signal.</div>
+          <div class="research-title">📰 Trusted ZEC &amp; TAO News</div>
+          <div class="research-sub" id="newsNote">Only official project announcements and selected established editorial outlets. No price-prediction blogs or promotional sites.</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px"><div class="research-status" id="newsStatus">LOADING</div><button class="btn-predict" id="newsRefresh" onclick="loadNewsContext(true)" style="padding:7px 10px;font-size:10px">Refresh news</button></div>
       </div>
       <div class="research-grid" id="newsColumns" style="grid-template-columns:repeat(2,minmax(0,1fr));gap:10px"></div>
-      <div style="font-size:10px;color:var(--muted2);line-height:1.55;margin-top:9px">“Development context”, “risk context”, and “market context” are simple headline-word labels—not a judgement that price will rise or fall. Open the original source before acting on any claim.</div>
+      <div style="font-size:10px;color:var(--muted2);line-height:1.55;margin-top:9px">Green means an official project source; blue means an established editorial source. “Development”, “risk”, and “market” are headline-word labels—not a judgement that price will rise or fall. Open the original source before acting on any claim.</div>
     </section>
 
     <section class="research-panel" aria-label="Research model comparison" style="display:none">
@@ -861,10 +861,10 @@ function makeNewsColumn(symbol, headlines) {
     var meta = document.createElement('div');
     meta.style.cssText = 'font-size:10px;color:var(--muted2);margin-top:4px';
     var label = document.createElement('span');
-    label.textContent = item.context || 'MARKET CONTEXT';
-    label.style.cssText = 'color:' + newsContextClass(item.context) + ';font-weight:800;margin-right:7px';
+    label.textContent = item.source_tier || 'TRUSTED SOURCE';
+    label.style.cssText = 'color:' + (item.source_tier === 'OFFICIAL PROJECT SOURCE' ? 'var(--green)' : 'var(--accent2)') + ';font-weight:800;margin-right:7px';
     meta.appendChild(label);
-    meta.appendChild(document.createTextNode((item.source || 'Source') + ' · ' + newsTimeLabel(item.published_at)));
+    meta.appendChild(document.createTextNode((item.source || 'Source') + ' · ' + newsTimeLabel(item.published_at) + ' · ' + (item.context || 'MARKET CONTEXT')));
     row.appendChild(link); row.appendChild(meta); column.appendChild(row);
   });
   return column;

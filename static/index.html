@@ -353,6 +353,7 @@ canvas{width:100%!important;height:100%!important}
     <section class="research-panel" id="experimentalPanel" aria-label="Experimental market observation" style="border-color:rgba(245,158,11,.7)">
       <div class="research-head"><div><div class="research-title">🧭 Prototype Data Collector — <span id="experimentalCoin">ZEC</span></div><div class="research-sub" id="experimentalNote">Input alignment is being measured; it is not a probability of profit.</div></div><div class="research-status" id="experimentalStatus">NO SAMPLE</div></div>
       <div class="research-grid"><div class="research-tile"><div class="research-label">Today's market snapshot — not a trade probability</div><div class="research-value" id="experimentalScore">— / 100</div><div class="research-detail" id="experimentalBias">No observation recorded</div></div><div class="research-tile"><div class="research-label">Evidence collected</div><div class="research-value" id="experimentalReadiness">0 / 50</div><div class="research-detail" id="experimentalReadinessNote">50 settled daily outcomes are needed before the score can be reviewed for calibration.</div></div><div class="research-tile"><div class="research-label">Measurement status</div><div class="research-detail" id="experimentalMeasurement">Need 50 settled observations before calibration can be assessed.</div></div><div class="research-tile"><div class="research-label">What the collector observed</div><div class="research-detail" id="experimentalIngredients">—</div></div></div>
+      <div class="research-model" style="margin-top:9px"><div class="research-model-name">⚡ Live Breakout Monitor — <span id="eventCoin">ZEC/USDT</span></div><div class="research-model-metric" id="eventStatus" style="color:var(--muted2)">CHECKING CURRENT MARKET…</div><div class="research-model-note" id="eventDetails">This detects unusually fast moves already under way; it is not a prediction.</div></div>
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
         <button class="btn-predict" id="experimentalRun" onclick="runExperimentalCheck()" style="padding:8px 12px;font-size:11px">Record Today’s Test Check — All Coins</button>
         <div id="experimentalTimer" style="font-size:11px;font-weight:750;color:var(--accent2)">Checking daily timer…</div>
@@ -818,6 +819,7 @@ function showCoinState() {
   loadNewsContext(false);
   loadTournamentStatus();
   loadExperimentalStatus();
+  loadMarketEvent();
 }
 
 function newsTimeLabel(iso) {
@@ -933,6 +935,30 @@ function loadExperimentalStatus() {
     document.getElementById('experimentalStatus').textContent = 'RESTART REQUIRED';
     document.getElementById('experimentalStatus').style.color = 'var(--orange)';
     document.getElementById('experimentalNote').textContent = 'Copy the newest app.py, stop the old app completely, then start it again. ' + error.message;
+  });
+}
+
+function loadMarketEvent() {
+  var coin = currentCoin;
+  var name = document.getElementById('eventCoin');
+  var status = document.getElementById('eventStatus');
+  var details = document.getElementById('eventDetails');
+  if (!name || !status || !details) return;
+  name.textContent = coin + '/USDT';
+  status.textContent = 'CHECKING CURRENT MARKET…';
+  status.style.color = 'var(--muted2)';
+  details.textContent = 'This detects unusually fast moves already under way; it is not a prediction.';
+  fetch(BASE + '/market-event/' + encodeURIComponent(coin)).then(function(r) {
+    if (!r.ok) throw new Error('unavailable');
+    return r.json();
+  }).then(function(data) {
+    status.textContent = data.status || 'UNAVAILABLE';
+    status.style.color = data.color === 'orange' ? 'var(--orange)' : data.color === 'red' ? 'var(--red)' : 'var(--muted2)';
+    details.textContent = (data.details || []).join(' · ') + '. ' + (data.note || '');
+  }).catch(function() {
+    status.textContent = 'CURRENT DATA UNAVAILABLE';
+    status.style.color = 'var(--muted2)';
+    details.textContent = 'The live event monitor could not load. This does not affect the daily research measurement.';
   });
 }
 

@@ -126,6 +126,18 @@ NEWS_SYMBOL_QUERIES = {
     "ZEC": 'Zcash OR ZEC cryptocurrency',
     "TAO": 'Bittensor OR TAO cryptocurrency',
 }
+# Only primary project announcements and a small set of established editorial
+# outlets are shown. This deliberately excludes price-prediction blogs,
+# promotional websites, aggregators, influencer posts, and press-release spam.
+NEWS_OFFICIAL_SOURCES = {
+    "ZEC": {"zcash foundation", "electric coin company", "z.cash", "zcash community"},
+    "TAO": {"bittensor", "opentensor foundation", "opentensor"},
+}
+NEWS_EDITORIAL_SOURCES = {
+    "reuters", "bloomberg", "financial times", "the wall street journal",
+    "wall street journal", "associated press", "the associated press",
+    "coindesk", "the block",
+}
 
 
 def _request_with_retry(url, *, params=None, headers=None, timeout=(3, 12), retries=2):
@@ -157,6 +169,20 @@ def _news_context_label(title):
     return "MARKET CONTEXT"
 
 
+def _normalise_news_source(source):
+    return re.sub(r"\s+", " ", (source or "").strip().lower())
+
+
+def _trusted_news_source_tier(symbol, source):
+    """Return visible provenance, or None when a publisher is excluded."""
+    normalised = _normalise_news_source(source)
+    if normalised in NEWS_OFFICIAL_SOURCES.get(symbol, set()):
+        return "OFFICIAL PROJECT SOURCE"
+    if normalised in NEWS_EDITORIAL_SOURCES:
+        return "ESTABLISHED EDITORIAL SOURCE"
+    return None
+
+
 def _fetch_news_for_symbol(symbol):
     query = NEWS_SYMBOL_QUERIES[symbol]
     response = _request_with_retry(
@@ -165,19 +191,27 @@ def _fetch_news_for_symbol(symbol):
         headers={"User-Agent": "KronosBTC-Research/1.0"}, timeout=(3, 10), retries=1)
     root = ET.fromstring(response.content)
     items = []
-    for node in root.findall("./channel/item")[:6]:
+    # Google News is only transport. Each publisher must pass the explicit
+    # allow-list above before its item reaches the app.
+    for node in root.findall("./channel/item"):
         title = html.unescape((node.findtext("title") or "Untitled").strip())
         link = (node.findtext("link") or "").strip()
         if urlparse(link).scheme not in {"http", "https"}:
             continue
         source = html.unescape((node.findtext("source") or "News source").strip())
+        source_tier = _trusted_news_source_tier(symbol, source)
+        if source_tier is None:
+            continue
         published = (node.findtext("pubDate") or "").strip()
         try:
             published_at = parsedate_to_datetime(published).astimezone(timezone.utc).isoformat()
         except (TypeError, ValueError):
             published_at = None
         items.append({"title": title, "source": source, "url": link,
-                      "published_at": published_at, "context": _news_context_label(title)})
+                      "published_at": published_at, "context": _news_context_label(title),
+                      "source_tier": source_tier})
+        if len(items) >= 6:
+            break
     return items
 
 
@@ -189,13 +223,13 @@ def get_news_context(force=False):
         fresh = cached["updated_at"] and now - cached["updated_at"] < NEWS_CACHE_SECS
     if fresh and not force:
         return {"items": cached["items"], "cached": True, "error": cached["error"],
-                "note": "Headlines are reading context only. They do not affect any score or trading decision."}
+                "note": "Strict source policy: official project sources and selected established editorial outlets only. Headlines never affect a score or trading decision."}
     try:
         items = {symbol: _fetch_news_for_symbol(symbol) for symbol in NEWS_SYMBOL_QUERIES}
         with news_lock:
             news_cache.update({"items": items, "updated_at": now, "error": None})
         return {"items": items, "cached": False, "error": None,
-                "note": "Headlines are reading context only. Labels describe words in the headline, not likely price direction."}
+                "note": "Strict source policy: official project sources and selected established editorial outlets only. Headline labels are not price predictions."}
     except Exception as exc:
         log.warning("News refresh failed: %s", exc)
         with news_lock:
